@@ -85,7 +85,8 @@ class Data:
 
         :param oid: Object ID of the thing to list
         """
-        r = requests.get(self.base_url+"/list/{}/".format(oid), self.headers)
+        r = requests.get(self.base_url+"/list/{}/".format(oid),
+                         headers=self.headers)
         if path == '/':
             path = ''
         for j in r.json():
@@ -268,6 +269,8 @@ class Data:
                                      **kwargs)
         oid = self.find_file(str(path.parent))
         r = requests.get(self.base_url+'/props/{}'.format(oid))
+        if not object_policy:
+            object_policy = json.dumps(r.json()['objectpolicy'])
 
         self.log.debug("New file under parent OID: {}".format(oid))
         body = {
