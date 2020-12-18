@@ -1,0 +1,84 @@
+# taken from https://github.com/greymatter-io/gm-data/blob/61cd28272166e34a307cc7eb0105c874deee73eb/docker-compose-standalone.yaml
+version: '2'
+services:
+  gmdata-standalone:
+    networks:
+      mesh:
+        aliases:
+          - gmdata-standalone
+    image: docker.greymatter.io/development/gm-data:1.1.3
+    ports:
+      - "8181:8181"
+    depends_on:
+      - mongo-ephemeral
+      - jwt-standalone
+      - kafka
+    environment:
+      - SLEEP_BEFORE_START=5
+      - CLIENT_JWT_ENDPOINT_ADDRESS=jwt-standalone
+      - CLIENT_JWT_ENDPOINT_PORT=8080
+      - CLIENT_JWT_ENDPOINT_PREFIX=/
+      - CLIENT_PREFIX=
+      - CLIENT_USE_TLS=false
+      - CLIENT_HOST=localhost
+      - CLIENT_PORT=8181
+      - GMDATA_NAMESPACE=world
+      - GMDATA_NAMESPACE_USERFIELD=email
+      - JWT_API_KEY=Zm9vCg==
+      - JWT_PUB=LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlHYk1CQUdCeXFHU000OUFnRUdCU3VCQkFBakE0R0dBQVFCSUVrNGpHL1FEMkZwNURxcmMrTzFPVy9CaG1BLwpKcmgyRFRaRWpybEZONnJYbTA0Vms0bUluNENZSmJ0VDdIQjc2cVJIeE9DNTFORVk0eFZHb1RUUVZta0Fnc3ljCllVdEdqZ3pKQUdTZExsSXZKSmtabWkrSjZBbWVtNng5UFZkajcxc2hHSnhNdjM4SDFTa2RRS29EZmllS3dZbFIKNENPUWFxdXdJVEpPYWd2R1VUQT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+      - TEST_JWT_PRIV=LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1JSGNBZ0VCQkVJQUludTVqbEdaU2Z6M2dMOWczOVNoeE5UaWtUQ0lvUWtFVVUyckdnV1ZJTm9TN3RlM2d1Uk8KK2VKb3FDZTd0Z3pKL1RZcGVxU055elE2UGVTS2JmZC91K2FnQndZRks0RUVBQ09oZ1lrRGdZWUFCQUVnU1RpTQpiOUFQWVdua09xdHo0N1U1YjhHR1lEOG11SFlOTmtTT3VVVTNxdGViVGhXVGlZaWZnSmdsdTFQc2NIdnFwRWZFCjRMblUwUmpqRlVhaE5OQldhUUNDekp4aFMwYU9ETWtBWkowdVVpOGttUm1hTDRub0NaNmJySDA5VjJQdld5RVkKbkV5L2Z3ZlZLUjFBcWdOK0o0ckJpVkhnSTVCcXE3QWhNazVxQzhaUk1BPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo=
+      - MASTERKEY=fark
+      - FILE_BUCKET=decipherers
+      - FILE_PARTITION=gmdatax
+      - USES3=false
+      - MONGOHOST=mongo-ephemeral
+      - MONGODB=chili
+      - KAFKA_PEERS=kafka:9092
+      - KAFKA_TOPIC_READ=gmdatax-audit
+      - KAFKA_TOPIC_UPDATE=gmdatax-replicationlog
+    volumes:
+      - ./privacy.html:/static/privacy.html
+
+  mongo-ephemeral:
+    networks:
+      - mesh
+    image: mongo
+
+  jwt-standalone:
+    networks:
+      - mesh
+    image: docker.greymatter.io/development/gm-jwt-security:latest
+    environment:
+      - JWT_PUB=LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlHYk1CQUdCeXFHU000OUFnRUdCU3VCQkFBakE0R0dBQVFCSUVrNGpHL1FEMkZwNURxcmMrTzFPVy9CaG1BLwpKcmgyRFRaRWpybEZONnJYbTA0Vms0bUluNENZSmJ0VDdIQjc2cVJIeE9DNTFORVk0eFZHb1RUUVZta0Fnc3ljCllVdEdqZ3pKQUdTZExsSXZKSmtabWkrSjZBbWVtNng5UFZkajcxc2hHSnhNdjM4SDFTa2RRS29EZmllS3dZbFIKNENPUWFxdXdJVEpPYWd2R1VUQT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+      - PRIVATE_KEY=LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1JSGNBZ0VCQkVJQUludTVqbEdaU2Z6M2dMOWczOVNoeE5UaWtUQ0lvUWtFVVUyckdnV1ZJTm9TN3RlM2d1Uk8KK2VKb3FDZTd0Z3pKL1RZcGVxU055elE2UGVTS2JmZC91K2FnQndZRks0RUVBQ09oZ1lrRGdZWUFCQUVnU1RpTQpiOUFQWVdua09xdHo0N1U1YjhHR1lEOG11SFlOTmtTT3VVVTNxdGViVGhXVGlZaWZnSmdsdTFQc2NIdnFwRWZFCjRMblUwUmpqRlVhaE5OQldhUUNDekp4aFMwYU9ETWtBWkowdVVpOGttUm1hTDRub0NaNmJySDA5VjJQdld5RVkKbkV5L2Z3ZlZLUjFBcWdOK0o0ckJpVkhnSTVCcXE3QWhNazVxQzhaUk1BPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo=
+      - TOKEN_EXP_TIME=30000
+      - REDIS_HOST=
+      - ENABLE_TLS=false
+      - ZEROLOG_LEVEL=debug
+      - JWT_API_KEY=Zm9vCg==
+    ports:
+      - "8480:8080"
+    volumes:
+      - ./users.json:/gm-jwt-security/etc/users.json
+
+  kafka:
+    networks:
+      mesh:
+        aliases:
+          - kafka
+    image: wurstmeister/kafka:2.12-2.2.0
+    environment:
+      - KAFKA_ADVERTISED_HOST_NAME=kafka
+      - KAFKA_ADVERTISED_PORT=9092
+      - KAFKA_ZOOKEEPER_CONNECT=zk:2181
+      - KAFKA_CREATE_TOPICS=gmdatax-audit:1:1,gmdatax-replicationlog:1:1
+    depends_on:
+      - zk
+
+  zk:
+    networks:
+      - mesh
+    image: wurstmeister/zookeeper
+
+networks:
+  mesh: {}

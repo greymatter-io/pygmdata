@@ -1,0 +1,396 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PyGMData &#8212; pygmdata  documentation</title>
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Installing pygmdata" href="install.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="pygmdata">
+<h1>PyGMData<a class="headerlink" href="#pygmdata" title="Permalink to this headline">¶</a></h1>
+<p>The actual Grey Matter Data interface class for Python.
+This works by keeping an internal representation of the Data file structure in a flat store which has the resource and the OID.
+It then calls out to the Data API using REST and the OID for a target resource.</p>
+<div class="section" id="id1">
+<h2><code class="docutils literal notranslate"><span class="pre">pygmdata</span></code><a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<dl class="py class">
+<dt id="pygmdata.pygmdata.Data">
+<em class="property">class </em><code class="sig-prename descclassname">pygmdata.pygmdata.</code><code class="sig-name descname">Data</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">base_url</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Class to interact with GM-Data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>base_url</strong> – URL that Data lives at. All interactions will append
+to this URL to interact with Data (ex base_url + “/self”)</p></li>
+<li><p><strong>kwargs</strong> – <p>Extra arguments to be supplied (case insensitive):</p>
+<ul>
+<li><dl class="simple">
+<dt>USER_DN - Your USER_DN to be used for interacting with Data.</dt><dd><p>This will be added to the header of every request.</p>
+</dd>
+</dl>
+</li>
+<li><p>logfile - File to save the log to. If not specified</p></li>
+<li><dl class="simple">
+<dt>log_level - Level of verbosity to log. Defaults to warning.</dt><dd><p>Can be integer or string.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.append_data">
+<code class="sig-name descname">append_data</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">data</span></em>, <em class="sig-param"><span class="n">data_filename</span></em>, <em class="sig-param"><span class="n">object_policy</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.append_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Append the given filename with the given data in memory</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Data to append to a file. Remember to add line endings
+if needed.</p></li>
+<li><p><strong>data_filename</strong> – Target filename to update</p></li>
+<li><p><strong>object_policy</strong> – Object Policy to use. Will update an existing
+object with this value or will make a new object with this policy.
+If not supplied for either, it will make a best effort to
+come up with a good response</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>True on success</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.append_file">
+<code class="sig-name descname">append_file</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">local_filename</span></em>, <em class="sig-param"><span class="n">data_filename</span></em>, <em class="sig-param"><span class="n">object_policy</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.append_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Append an uploaded file with another file on disk</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>local_filename</strong> – Filename on disk that will be appended to the
+data_filename</p></li>
+<li><p><strong>data_filename</strong> – Filename to append the new file to</p></li>
+<li><p><strong>object_policy</strong> – Object Policy to use. Will update an existing
+object with this value or will make a new object with this policy.
+If not supplied for either, it will make a best effort to
+come up with a good response</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>True on success</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.create_meta">
+<code class="sig-name descname">create_meta</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">data_filename</span></em>, <em class="sig-param"><span class="n">object_policy</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.create_meta" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create the meta data for an object to be uploaded</p>
+<p>Will determine if the action is to create or update the object
+and create all of the necessary metadata needed for making/updating
+it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data_filename</strong> – The filename that will be used in Data</p></li>
+<li><p><strong>object_policy</strong> – Object Policy to use. Will update an existing
+object with this value or will make a new object with this policy.
+If not supplied for either, it will make a best effort to
+come up with a good response</p></li>
+<li><p><strong>kwargs</strong> – extra keywords to be set:
+- security - The security tag of the given file. If not supplied
+it will keep what is already there or it will use the field
+from the parent if creating a new file.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Metadata dictionary</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.download_file">
+<code class="sig-name descname">download_file</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">file</span></em>, <em class="sig-param"><span class="n">local_filename</span></em>, <em class="sig-param"><span class="n">chunk_size</span><span class="o">=</span><span class="default_value">8192</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.download_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Downloads a file onto the local file system.</p>
+<p>Streams a file in chunks of 8192 to write the given file onto the
+filesystem. Streaming with chunks of this size can save lots of
+memory when downloading large files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>file</strong> – File within GM-Data to download</p></li>
+<li><p><strong>local_filename</strong> – Filename to be written onto the local filesystem</p></li>
+<li><p><strong>chunk_size</strong> – Size of chunks to be used. Defaults to 8192</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Written filename on success</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.find_file">
+<code class="sig-name descname">find_file</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">filename</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.find_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find a given file within the file hierarchy</p>
+<p>Try to find a file within the file hierarchy, if it is not immediately
+found, repopulate the hierarchy and try again. If it is still
+not found, return None</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>filename</strong> – Filename to be fond within GM Data</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>The GM Data oid if found or None if not</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.get_part">
+<code class="sig-name descname">get_part</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">data_filename</span></em>, <em class="sig-param"><span class="n">object_policy</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.get_part" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the file part append for a multi part file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data_filename</strong> – Filename in GM Data</p></li>
+<li><p><strong>object_policy</strong> – optional object policy to use</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>File part like ‘aab’</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.get_self">
+<code class="sig-name descname">get_self</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.get_self" title="Permalink to this definition">¶</a></dt>
+<dd><p>Hit GM Data’s self endpoint.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p><p>Description of the user’s credential token in the format of</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="s2">&quot;label&quot;</span><span class="p">:</span><span class="n">USER_DN</span><span class="p">,</span><span class="s2">&quot;exp&quot;</span><span class="p">:</span><span class="mi">1608262398</span><span class="p">,</span><span class="s2">&quot;iss&quot;</span><span class="p">:</span><span class="s2">&quot;greymatter.io&quot;</span><span class="p">,</span>
+<span class="s2">&quot;values&quot;</span><span class="p">:{</span><span class="s2">&quot;email&quot;</span><span class="p">:[</span><span class="s2">&quot;dave.borncamp@greymatter.io&quot;</span><span class="p">],</span>
+<span class="s2">&quot;org&quot;</span><span class="p">:[</span><span class="s2">&quot;greymatter.io&quot;</span><span class="p">]}}</span>
+</pre></div>
+</div>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.make_directory_tree">
+<code class="sig-name descname">make_directory_tree</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">path</span></em>, <em class="sig-param"><span class="n">object_policy</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.make_directory_tree" title="Permalink to this definition">¶</a></dt>
+<dd><p>Recursively create directories in GM Data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>path</strong> – Path to be created in GM Data</p></li>
+<li><p><strong>object_policy</strong> – Object Policy to be used for all folders that
+will be created</p></li>
+<li><p><strong>kwargs</strong> – extra keywords to be set:
+- security - The security tag of the given file. If not supplied
+it will keep what is already there or it will use the field
+from the parent if creating a new file.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>oid on success</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.populate_hierarchy">
+<code class="sig-name descname">populate_hierarchy</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">path</span></em>, <em class="sig-param"><span class="n">oid</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.populate_hierarchy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Populate the internal hierarchy structure.</p>
+<p>Every GM Data data object has an Object ID, including directories and
+files. This serves as a way to keep track of individual listings
+that can be easily accessed through an API call.</p>
+<p>This function recursively searches the Data directory tree starting
+at the given oid and calls <cite>list</cite> on it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>path</strong> – Directory path that the object is nestled in.
+This will be prepended to the object’s name and used as a key
+in the internal hierarchy dictionary.
+Always starts out as <cite>/</cite> then builds to <cite>/world</cite> and so forth until
+the entire listing in Data is mapped.</p></li>
+<li><p><strong>oid</strong> – Object ID of the thing to list</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.set_log_level">
+<code class="sig-name descname">set_log_level</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">level</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.set_log_level" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set the log level for the log</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>level</strong> – Level of verbosity to log. Defaults to warning.
+Can be integer or string.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.start_logger">
+<em class="property">static </em><code class="sig-name descname">start_logger</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span><span class="o">=</span><span class="default_value">'pygmdata'</span></em>, <em class="sig-param"><span class="n">logfile</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.start_logger" title="Permalink to this definition">¶</a></dt>
+<dd><p>Start logging what is going on</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> – Name of the logger to use. Defaults to “pygmdata”</p></li>
+<li><p><strong>logfile</strong> – Name of output logfile. Default to not saving.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>logfile written to disk</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="pygmdata.pygmdata.Data.upload_file">
+<code class="sig-name descname">upload_file</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">local_filename</span></em>, <em class="sig-param"><span class="n">data_filename</span></em>, <em class="sig-param"><span class="n">object_policy</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#pygmdata.pygmdata.Data.upload_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Upload a file from the local filesystem to GM-Data.</p>
+<p>This will upload a file from the local file system to GM-Data.
+If the file already exists, it will update the file.
+If it does not exist, it will create a new file in the given
+directory in GM-Data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>local_filename</strong> – Filename to upload on the local filesystem</p></li>
+<li><p><strong>data_filename</strong> – Filename of the destination in GM Data</p></li>
+<li><p><strong>object_policy</strong> – Object Policy permissions for the file to have.
+If not supplied and updating a file, it will keep what is already in
+Data. If creating a new file and not supplied, it will likely fail
+as a file will be uploaded that cannot be accessed by anyone.</p></li>
+<li><p><strong>kwargs</strong> – extra keywords to be set:
+- security - The security tag of the given file. If not supplied
+it will keep what is already there or it will use the field
+from the parent if creating a new file.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>False if request doesn’t succeed or cannot be built
+True if it succeeds</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">pygmdata</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="install.html">Installing pygmdata</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">PyGMData</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#id1"><code class="docutils literal notranslate"><span class="pre">pygmdata</span></code></a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="install.html" title="previous chapter">Installing pygmdata</a></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Dave Borncamp.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.3.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/pygmdata.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
