@@ -29,7 +29,7 @@ class Data:
         self.data = None
         self.hierarchy = {}
         self.log = None
-        level = None
+        level = "warning"
 
         for key, value in kwargs.items():
             # print("{} is {}".format(key, value))
