@@ -279,7 +279,7 @@ class Data:
         self.log.debug("New file under parent OID: {}".format(oid))
 
         body = {
-            "action": "U",
+            "action": "C",
             "name": path.name,
             "parentoid": oid,
             "isFile": False
