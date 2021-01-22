@@ -7,6 +7,7 @@ from requests_toolbelt import MultipartEncoder
 import mimetypes
 import json
 from pathlib import Path
+from PIL import Image
 import logging
 
 
@@ -119,6 +120,7 @@ class Data:
             - security - The security tag of the given file. If not supplied
             it will keep what is already there or it will use the field
             from the parent if creating a new file.
+            - mimetype - The
         :return: Metadata dictionary
         """
         self.log.debug("Create Metadata object_policy {}".format(object_policy))
@@ -274,7 +276,7 @@ class Data:
 
         self.log.debug("New file under parent OID: {}".format(oid))
         body = {
-            "action": "C",
+            "action": "U",
             "name": path.name,
             "parentoid": oid,
             "isFile": False,
@@ -384,8 +386,8 @@ class Data:
         """
         part = self.get_part(data_filename, object_policy=object_policy)
 
-        a=self.upload_file(local_filename, "{}/{}".format(data_filename, part),
-                           object_policy=object_policy)
+        a = self.upload_file(local_filename, "{}/{}".format(data_filename, part),
+                             object_policy=object_policy)
         return a
 
     def append_data(self, data, data_filename, object_policy=None):
@@ -473,6 +475,55 @@ class Data:
             return local_filename
         else:
             self.log.warning("Cannot find file in GM-Data to download.")
+
+    def get_buffered_steam(self, file):
+        """Get a file as a data stream into memory
+
+        :param file: File name within GM-Data to download
+        :return: bytestream of file contents
+        """
+        oid = self.find_file(file)
+
+        if oid:
+            r = requests.get(self.base_url+"/stream/{}".format(oid),
+                             headers=self.headers, stream=True)
+            r.raise_for_status()
+            r.raw.decode_content = True
+            return io.BytesIO(r.content)
+        else:
+            self.log.warning("Cannot find file in GM-Data to download.")
+
+    def stream_file(self, file):
+        """Get a file loaded into memory.
+
+        Look at the Content-Type header and parse the returned variable
+        accordingly:
+
+        - `image/jpeg` return a PIL image
+        - `application/json` return a dictionary in json format
+        - `text/plain` return decoded text of object
+
+        :param file: File name within GM-Data to download
+        :return: Object
+        """
+        oid = self.find_file(file)
+
+        if not oid:
+            self.log.warning("Cannot find file in GM-Data to download.")
+            return None
+
+        r = requests.get(self.base_url+"/stream/{}".format(oid),
+                         headers=self.headers, stream=True)
+        r.raise_for_status()
+        r.raw.decode_content = True
+
+        if r.headers['Content-Type'] == 'image/jpeg':
+            im = Image.open(r.raw)
+            return im
+        if r.headers['Content-Type'] == 'application/json':
+            return r.json()
+        if r.headers['Content-Type'] == 'text/plain':
+            return r.content.decode()
 
     # --- Utility functions
 
