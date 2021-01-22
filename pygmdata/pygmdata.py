@@ -536,7 +536,7 @@ class Data:
         found, repopulate the hierarchy and try again. If it is still
         not found, return None
 
-        :param filename: Filename to be fond within GM Data
+        :param filename: Filename to be found within GM Data
         :return: The GM Data oid if found or None if not
         """
         try:
