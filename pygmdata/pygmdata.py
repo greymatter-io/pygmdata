@@ -120,7 +120,8 @@ class Data:
             - security - The security tag of the given file. If not supplied
             it will keep what is already there or it will use the field
             from the parent if creating a new file.
-            - mimetype - The
+            - mimetype - Mimetype to be used as a header value to be uploaded.
+            If not supplied it will make it's best guess at the value.
         :return: Metadata dictionary
         """
         self.log.debug("Create Metadata object_policy {}".format(object_policy))
@@ -139,7 +140,7 @@ class Data:
             self.log.debug("Found the file for updating. OID: {}".format(oid))
             r = requests.get(self.base_url+'/props/{}'.format(oid))
             meta = r.json()
-            meta['action'] = "U"
+            meta['action'] = "C"
             if object_policy:
                 if isinstance(object_policy, str):
                     meta['objectpolicy'] = json.loads(object_policy)
