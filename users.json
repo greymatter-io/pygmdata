@@ -37,6 +37,14 @@
         "org": [ "greymatter.io" ],
         "privilege": [ "root" ]
       }
+    },
+    {
+      "label": "CN=hiromi.suenaga,OU=Engineering,O=Decipher Technology Studios,L=Alexandria,ST=Virginia,C=US",
+      "values": {
+        "email": ["hiromi.suenaga@greymatter.io"],
+        "org": ["greymatter.io", "deciphernow.com"],
+        "privilege": [ "root" ]
+      }
     }
   ]
 }

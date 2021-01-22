@@ -30,6 +30,7 @@ class Data:
         self.hierarchy = {}
         self.log = None
         level = "warning"
+        self.default_security = { "label": "DECIPHER//GMDATA",  "foreground": "#FFFFFF","background": "green"}
 
         for key, value in kwargs.items():
             # print("{} is {}".format(key, value))
@@ -245,12 +246,12 @@ class Data:
 
         return ok
 
-    def make_directory_tree(self, path, object_policy=None, **kwargs):
+    def make_directory_tree(self, path, lisp_object_policy=None, **kwargs):
         """Recursively create directories in GM Data.
 
         :param path: Path to be created in GM Data
-        :param object_policy: Object Policy to be used for all folders that
-            will be created
+        :param lisp_object_policy: A LISP statement of the Object Policy to be 
+            used for all folders that will be created in 
         :param kwargs: extra keywords to be set:
             - security - The security tag of the given file. If not supplied
             it will keep what is already there or it will use the field
@@ -262,36 +263,36 @@ class Data:
 
         self.log.debug("Looking for {}, oid {}".format(path.parent, oid))
         if not oid:
+            if str(path) == path.root:
+                raise Exception('Unable to locate the root directory')
             self.log.debug("Path {} not found, creating"
                            " parent".format(path.parent))
             self.make_directory_tree(str(path.parent),
-                                     object_policy=object_policy,
+                                     lisp_object_policy=lisp_object_policy,
                                      **kwargs)
+
         oid = self.find_file(str(path.parent))
-        r = requests.get(self.base_url+'/props/{}'.format(oid))
-        if not object_policy:
-            object_policy = json.dumps(r.json()['objectpolicy'])
 
         self.log.debug("New file under parent OID: {}".format(oid))
+
         body = {
             "action": "C",
             "name": path.name,
             "parentoid": oid,
-            "isFile": False,
-            "objectpolicy": json.loads(object_policy),
+            "isFile": False
         }
-        if object_policy:
-            body['objectpolicy'] = json.loads(object_policy)
+
+        if lisp_object_policy:
+            body['originalobjectpolicy'] = lisp_object_policy
         else:
-            body['objectpolicy'] = r.json()['objectpolicy']
-        r.close()
-        try:
-            if kwargs['security']:
-                body['security'] = kwargs['security']
-        except KeyError:
-            r = requests.get(self.base_url + '/props/{}'.format(oid))
-            body['security'] = r.json()['security']
+            r = requests.get(self.base_url+'/props/{}'.format(oid))
+            body['objectpolicy'] = json.dumps(r.json()['objectpolicy'])
             r.close()
+
+        if 'security' in kwargs:
+                body['security'] = kwargs['security']
+        else:
+            body['security'] =  self.default_security
 
         files = {
             'file': ('meta', json.dumps([body]))}
