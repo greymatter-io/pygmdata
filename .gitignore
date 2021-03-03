@@ -3,3 +3,5 @@ dataLib/
 build/
 dist/
 *.egg-info/
+pygmdata/__pycache__/
+.ipynb_checkpoints/

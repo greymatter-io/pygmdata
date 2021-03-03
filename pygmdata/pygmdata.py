@@ -527,6 +527,72 @@ class Data:
         if r.headers['Content-Type'] == 'text/plain':
             return r.content.decode()
 
+    def stream_upload(self, data, data_filename, object_policy=None, **kwargs):
+        """Upload a file from memory
+
+        :param data: Data to upload to a file.
+        :param data_filename: Target filename to upload to
+        :param object_policy: Object Policy to use. Will update an existing
+            object with this value or will make a new object with this policy.
+            If not supplied for either, it will make a best effort to
+            come up with a good response
+        :return: True on success
+        """
+        self.log.debug("Uploading file {} op {}".format(data_filename,
+                                                        object_policy))
+        self.log.debug("{}".format(type(object_policy)))
+        meta = self.create_meta(data_filename, object_policy=object_policy,
+                                **kwargs)
+
+        mimetype = mimetypes.guess_type(data_filename)
+        multipart_data = MultipartEncoder(
+            fields={"meta": json.dumps([meta]),
+                    "blob": (data_filename, data, mimetype[0])}
+        )
+        if isinstance(data, str):
+            with io.StringIO(data) as f:
+                multipart_data = MultipartEncoder(
+                    fields={"meta": json.dumps([meta]),
+                            "blob": (data_filename,
+                                     f, mimetype[0])}
+                )
+
+                headers = copy.copy(self.headers)
+                headers['Content-Type'] = multipart_data.content_type
+                r = requests.post(self.base_url + "/write", data=multipart_data,
+                                  headers=headers)
+
+        else:
+            with io.BytesIO(data) as f:
+                multipart_data = MultipartEncoder(
+                    fields={"meta": json.dumps([meta]),
+                            "blob": (data_filename,
+                                     f, mimetype[0])}
+                )
+
+                headers = copy.copy(self.headers)
+                headers['Content-Type'] = multipart_data.content_type
+                r = requests.post(self.base_url + "/write", data=multipart_data,
+                                  headers=headers)
+
+        headers = copy.copy(self.headers)
+        headers['Content-length'] = str(sys.getsizeof(data))
+        headers['Content-Type'] = multipart_data.content_type
+        self.log.debug("The append_data sent request")
+        self.log.debug("URL: {}".format(r.request.url))
+        self.log.debug("Body: {}".format(r.request.body))
+        self.log.debug("Headers: {}".format(r.request.headers))
+        self.log.debug("Response")
+        self.log.debug(r.status_code)
+        self.log.debug(r.json())
+        r.close()
+        f.flush()
+
+        if r.ok:
+            self.hierarchy[data_filename] = r.json()[0]["oid"]
+
+        return r.ok
+
     # --- Utility functions
 
     def find_file(self, filename):
