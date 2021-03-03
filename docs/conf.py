@@ -18,7 +18,7 @@
 # -- Project information -----------------------------------------------------
 
 project = 'pygmdata'
-copyright = '2020, Dave Borncamp'
+copyright = '2021, Dave Borncamp, Decipher Technology Studios'
 author = 'Dave Borncamp'
 
 
@@ -40,7 +40,7 @@ templates_path = ['_templates']
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
-version = '0.0.1'
+version = '0.0.5'
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
