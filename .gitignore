@@ -5,3 +5,5 @@ dist/
 *.egg-info/
 pygmdata/__pycache__/
 .ipynb_checkpoints/
+*/_build/
+.DS_Store

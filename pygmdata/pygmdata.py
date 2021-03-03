@@ -289,13 +289,14 @@ class Data:
             body['originalobjectpolicy'] = lisp_object_policy
         else:
             r = requests.get(self.base_url+'/props/{}'.format(oid))
-            body['objectpolicy'] = json.dumps(r.json()['objectpolicy'])
+            self.log.debug("The parsed OP: {}".format(r.json()['objectpolicy']))
+            body['objectpolicy'] = r.json()['objectpolicy']
             r.close()
 
         if 'security' in kwargs:
-                body['security'] = kwargs['security']
+            body['security'] = kwargs['security']
         else:
-            body['security'] =  self.default_security
+            body['security'] = self.default_security
 
         files = {
             'file': ('meta', json.dumps([body]))}
@@ -308,7 +309,7 @@ class Data:
         self.log.debug("Headers: {}".format(r.request.headers))
         self.log.debug("Response")
         self.log.debug(r.status_code)
-        self.log.debug(r.json())
+        self.log.debug(r.raw)
 
         ok = r.ok
         oid = r.json()[0]["oid"]
@@ -527,10 +528,27 @@ class Data:
         if r.headers['Content-Type'] == 'text/plain':
             return r.content.decode()
 
-    def stream_upload(self, data, data_filename, object_policy=None, **kwargs):
-        """Upload a file from memory
+    def stream_upload_string(self, s, data_filename, object_policy=None, **kwargs):
+        """Upload a string into file from memory
 
-        :param data: Data to upload to a file.
+        :param s: Data to upload to a file.
+        :param data_filename: Target filename to upload to
+        :param object_policy: Object Policy to use. Will update an existing
+            object with this value or will make a new object with this policy.
+            If not supplied for either, it will make a best effort to
+            come up with a good response
+        :return: True on success
+        """
+        if isinstance(s, str):
+            with io.StringIO(s) as f:
+                return self.stream_upload(f, data_filename, object_policy,
+                                          **kwargs)
+
+    def stream_upload(self, data_buf, data_filename, object_policy=None,
+                      **kwargs):
+        """Upload a file buffer from memory as a given filename
+
+        :param data_buf: Buffer of data to upload to a file.
         :param data_filename: Target filename to upload to
         :param object_policy: Object Policy to use. Will update an existing
             object with this value or will make a new object with this policy.
@@ -545,39 +563,18 @@ class Data:
                                 **kwargs)
 
         mimetype = mimetypes.guess_type(data_filename)
+
         multipart_data = MultipartEncoder(
             fields={"meta": json.dumps([meta]),
-                    "blob": (data_filename, data, mimetype[0])}
+                    "blob": (data_filename,
+                             data_buf, mimetype[0])}
         )
-        if isinstance(data, str):
-            with io.StringIO(data) as f:
-                multipart_data = MultipartEncoder(
-                    fields={"meta": json.dumps([meta]),
-                            "blob": (data_filename,
-                                     f, mimetype[0])}
-                )
-
-                headers = copy.copy(self.headers)
-                headers['Content-Type'] = multipart_data.content_type
-                r = requests.post(self.base_url + "/write", data=multipart_data,
-                                  headers=headers)
-
-        else:
-            with io.BytesIO(data) as f:
-                multipart_data = MultipartEncoder(
-                    fields={"meta": json.dumps([meta]),
-                            "blob": (data_filename,
-                                     f, mimetype[0])}
-                )
-
-                headers = copy.copy(self.headers)
-                headers['Content-Type'] = multipart_data.content_type
-                r = requests.post(self.base_url + "/write", data=multipart_data,
-                                  headers=headers)
 
         headers = copy.copy(self.headers)
-        headers['Content-length'] = str(sys.getsizeof(data))
         headers['Content-Type'] = multipart_data.content_type
+        r = requests.post(self.base_url + "/write", data=multipart_data,
+                          headers=headers)
+
         self.log.debug("The append_data sent request")
         self.log.debug("URL: {}".format(r.request.url))
         self.log.debug("Body: {}".format(r.request.body))
@@ -586,7 +583,6 @@ class Data:
         self.log.debug(r.status_code)
         self.log.debug(r.json())
         r.close()
-        f.flush()
 
         if r.ok:
             self.hierarchy[data_filename] = r.json()[0]["oid"]
