@@ -24,6 +24,16 @@ class Data:
             - logfile - File to save the log to. If not specified
             - log_level - Level of verbosity to log. Defaults to warning.
                 Can be integer or string.
+            - security - The default security policy to use. This can be
+                overidden when writing files. If not specified it will use:
+                ::
+
+                    {"label": "DECIPHER//GMDATA",
+                     "foreground": "#FFFFFF",
+                     "background": "green"}
+            - cert - Certificate to use in pem format
+            - key - keyfile to use in pem format
+            - trust - CA trust to use to make TLS connections
         """
         self.base_url = base_url
         self.headers = {}
@@ -31,7 +41,9 @@ class Data:
         self.hierarchy = {}
         self.log = None
         level = "warning"
-        self.default_security = { "label": "DECIPHER//GMDATA",  "foreground": "#FFFFFF","background": "green"}
+        self.default_security = {"label": "DECIPHER//GMDATA",
+                                 "foreground": "#FFFFFF",
+                                 "background": "green"}
 
         for key, value in kwargs.items():
             # print("{} is {}".format(key, value))
@@ -42,6 +54,14 @@ class Data:
                 self.log = self.start_logger(value)
             if "log_level" == key.lower():
                 level = value
+            if "security" == key.lower():
+                self.default_security = value
+            if "cert" == key.lower():
+                self.cert = value
+            if "key" == key.lower():
+                self.key = value
+            if "trust" == key.lower():
+                self.trust = value
         if not self.log:
             self.log = self.start_logger()
         # Set the level now that the logger exists
@@ -52,6 +72,31 @@ class Data:
         except Exception as e:
             self.log.error("Could not populate hierarchy. Check the base_url")
             raise e
+
+    def get_config(self):
+        """Hit the `/config` endpoint to probe how Data is setup
+
+        :return: json from the config endpoint
+        """
+        r = requests.get(self.base_url + "/config")
+
+        return r.json()
+
+    def get_self_idenfify(self, object_policy=None):
+        """Identify self and make user directory
+
+        :return:
+        """
+        configs = self.get_config()
+        namespace_userfield = configs["GMDATA_NAMESPACE_USERFIELD"]
+        root = configs["GMDATA_NAMESPACE"]
+
+        self_json_values = self.get_self()
+
+        user_folder_name = json.loads(self_json_values)['values'][namespace_userfield][0]
+        user_folder = "/{}/{}".format(root, user_folder_name)
+        return self.make_directory_tree(user_folder,
+                                        object_policy=object_policy)
 
     def get_self(self):
         """Hit GM Data's self endpoint.
@@ -68,6 +113,83 @@ class Data:
         ret = r.text
         r.close()
         return ret
+
+    def get_props(self, path):
+        """Get the properties of a given Data object.
+
+        This essentially returns the metadata of a given object in Data.
+
+        :param path: Directory path that the object is nestled in.
+
+        :return: json of properties if it exists, None if not.
+            ::
+
+                {'tstamp': '1668e4d701ac18a4',
+                 'userpolicy': {'label': 'CN=dave.borncamp,OU=Engineering,O=Untrusted Example,L=Baltimore,ST=MD,C=US'},
+                 'jwthash': '368734e0d26fe381726932a727a04c9f4db9cca995e2341151d2c664e636b8f3',
+                 'schemaversion': 10,
+                 'name': 'dave.borncamp@greymatter.io',
+                 'action': 'C',
+                 'oid': '1668e4d701979c80',
+                 'parentoid': '1668e15c6792db54',
+                 'expiration': '7fffffffffffffff',
+                 'checkedtstamp': '1668e15c679cd280',
+                 'objectpolicy': {'requirements': {'f': 'if',
+                   'a': [{'f': 'contains',
+                   'a': [{'v': 'email'}, {'v': 'dave.borncamp@greymatter.io'}]},
+                    {'f': 'yield-all'},
+                    {'f': 'yield', 'a': [{'v': 'R'}, {'v': 'X'}]}]}},
+                 'derived': {},
+                 'security': {'label': 'DECIPHER//GMDATA',
+                  'foreground': '#FFFFFF',
+                  'background': 'green'},
+                 'originalobjectpolicy': '(if (contains email "dave.borncamp@greymatter.io")(yield-all)(yield R X))',
+                 'policy': {'policy': ['R', 'X']},
+                 'cluster': 'default'}
+        """
+        path = Path(path)
+        oid = self.find_file(str(path))
+
+        self.log.debug("Looking for props of: {}, oid {}".format(path, oid))
+        if not oid:
+            if str(path) == path.root:
+                raise Exception('Unable to locate the root directory')
+            self.log.info("Path {} not found, cannot get props"
+                          "".format(path))
+            return None
+
+        r = requests.get(self.base_url + '/props/{}'.format(oid),
+                         headers=self.headers)
+        return r.json()
+
+    def get_list(self, path):
+        """Get the contents of a given path.
+
+        This gives the most recent tstamp by oid. The result is sorted by oid,
+        and should only have one historical object per oid with highest tstamp.
+
+        Note: Listings of files will return None
+
+        :param path: Directory path that the object is nestled in.
+
+        :return: json of listing if it exists, None if not
+        """
+        path = Path(path)
+        oid = self.find_file(str(path))
+
+        self.log.debug("Looking for listing of: {}, oid {}".format(path, oid))
+        if not oid:
+            if str(path) == path.root:
+                raise Exception('Unable to locate the root directory')
+            self.log.info("Path {} not found, cannot get listing"
+                          "".format(path))
+            return None
+
+        r = requests.get(self.base_url + '/list/{}'.format(oid),
+                         headers=self.headers)
+        if r.ok:
+            return r.json()
+        return None
 
     def populate_hierarchy(self, path, oid):
         """Populate the internal hierarchy structure.
@@ -249,11 +371,11 @@ class Data:
 
         return ok
 
-    def make_directory_tree(self, path, lisp_object_policy=None, **kwargs):
+    def make_directory_tree(self, path, object_policy=None, **kwargs):
         """Recursively create directories in GM Data.
 
         :param path: Path to be created in GM Data
-        :param lisp_object_policy: A LISP statement of the Object Policy to be 
+        :param object_policy: A LISP statement of the Object Policy to be
             used for all folders that will be created in 
         :param kwargs: extra keywords to be set:
             - security - The security tag of the given file. If not supplied
@@ -271,12 +393,13 @@ class Data:
             self.log.debug("Path {} not found, creating"
                            " parent".format(path.parent))
             self.make_directory_tree(str(path.parent),
-                                     lisp_object_policy=lisp_object_policy,
+                                     object_policy=object_policy,
                                      **kwargs)
 
         oid = self.find_file(str(path.parent))
 
-        self.log.debug("New file under parent OID: {}".format(oid))
+        self.log.debug("New file under parent OID: {}, name: {}"
+                       "".format(oid, path.name))
 
         body = {
             "action": "C",
@@ -285,8 +408,8 @@ class Data:
             "isFile": False
         }
 
-        if lisp_object_policy:
-            body['originalobjectpolicy'] = lisp_object_policy
+        if object_policy:
+            body['originalobjectpolicy'] = object_policy
         else:
             r = requests.get(self.base_url+'/props/{}'.format(oid))
             self.log.debug("The parsed OP: {}".format(r.json()['objectpolicy']))
@@ -298,8 +421,7 @@ class Data:
         else:
             body['security'] = self.default_security
 
-        files = {
-            'file': ('meta', json.dumps([body]))}
+        files = {'file': ('meta', json.dumps([body]))}
         r = requests.post(self.base_url + "/write", files=files,
                           headers=self.headers)
 
@@ -312,12 +434,13 @@ class Data:
         self.log.debug(r.raw)
 
         ok = r.ok
-        oid = r.json()[0]["oid"]
         r.close()
         if ok:
+            oid = r.json()[0]["oid"]
             self.hierarchy[path] = oid
+            return oid
 
-        return oid
+        return False
 
     def get_part(self, data_filename, object_policy=None):
         """Get the file part append for a multi part file
@@ -473,7 +596,6 @@ class Data:
                 r.raise_for_status()
                 with open(local_filename, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=chunk_size):
-
                         f.write(chunk)
             return local_filename
         else:
@@ -527,6 +649,7 @@ class Data:
             return r.json()
         if r.headers['Content-Type'] == 'text/plain':
             return r.content.decode()
+        return io.BytesIO(r.content)
 
     def stream_upload_string(self, s, data_filename, object_policy=None, **kwargs):
         """Upload a string into file from memory
