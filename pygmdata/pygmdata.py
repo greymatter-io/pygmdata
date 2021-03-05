@@ -32,9 +32,12 @@ class Data:
                     {"label": "DECIPHER//GMDATA",
                      "foreground": "#FFFFFF",
                      "background": "green"}
-            - cert - Certificate to use in pem format
-            - key - keyfile to use in pem format
-            - trust - CA trust to use to make TLS connections
+
+            - cert - Certificate to use in pem format.
+            - key - keyfile to use in pem format.
+            - trust - CA trust to use to make TLS connections.
+            - repopulate - A hack to get around changes that may have happened
+                in Data between file uploads and hierarchy updates
         """
         self.base_url = base_url
         self.headers = {}
@@ -44,13 +47,13 @@ class Data:
         self.cert = None
         self.key = None
         self.trust = False
+        self.repopulate = True
         level = "warning"
         self.default_security = {"label": "DECIPHER//GMDATA",
                                  "foreground": "#FFFFFF",
                                  "background": "green"}
 
         for key, value in kwargs.items():
-            # print("{} is {}".format(key, value))
             if "user_dn" == key.lower():
                 self.headers["USER_DN"] = value
                 self.user_dn = value
@@ -66,6 +69,8 @@ class Data:
                 self.key = value
             if "trust" == key.lower():
                 self.trust = value
+            if "repopulate" == key.lower():
+                self.repopulate = value
         if not self.log:
             self.log = self.start_logger()
         # Set the level now that the logger exists
@@ -87,14 +92,17 @@ class Data:
 
         return r.json()
 
-    def get_self_idenfify(self, object_policy=None):
+    def get_self_identify(self, object_policy=None,
+                          original_object_policy=None):
         """Identify self and make user directory
 
         :param object_policy: Object policy to use to create home directory.
             Make sure that "U" permissions are given, If not supplied it
             will try to use the policy of the root directory which may
             not grant the user "U" permissions.
-
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
         :return: True if successful
         """
         configs = self.get_config()
@@ -106,7 +114,8 @@ class Data:
         user_folder_name = json.loads(self_json_values)['values'][namespace_userfield][0]
         user_folder = "/{}/{}".format(root, user_folder_name)
         return self.make_directory_tree(user_folder,
-                                        object_policy=object_policy)
+                                        object_policy=object_policy,
+                                        original_object_policy=original_object_policy)
 
     def get_self(self):
         """Hit GM Data's self endpoint.
@@ -249,7 +258,7 @@ class Data:
                 self.populate_hierarchy(filepath)
 
     def create_meta(self, data_filename, object_policy=None,
-                    **kwargs):
+                    original_object_policy=None, **kwargs):
         """Create the meta data for an object to be uploaded
 
         Will determine if the action is to create or update the object
@@ -261,6 +270,9 @@ class Data:
             object with this value or will make a new object with this policy.
             If not supplied for either, it will make a best effort to
             come up with a good response
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
         :param kwargs: extra keywords to be set:
             - security - The security tag of the given file. If not supplied
             it will keep what is already there or it will use the field
@@ -272,6 +284,8 @@ class Data:
         self.log.debug("Create Metadata object_policy {}".format(object_policy))
         # check to see if it exists. If so, it is an update else create
         oid = self.find_file(data_filename)
+        if isinstance(object_policy, str):
+            object_policy = json.loads(object_policy)
 
         if "mimetype" in kwargs.keys():
             mimetype = kwargs["mimetype"]
@@ -287,10 +301,9 @@ class Data:
                            "OID: {}".format(oid))
             meta['action'] = "U"
             if object_policy:
-                if isinstance(object_policy, str):
-                    meta['objectpolicy'] = json.loads(object_policy)
-                else:
-                    meta['objectpolicy'] = object_policy
+                meta['objectpolicy'] = object_policy
+            if original_object_policy:
+                meta['originalobjectpolicy'] = original_object_policy
             try:
                 if kwargs['security']:
                     meta['security'] = kwargs['security']
@@ -303,14 +316,16 @@ class Data:
             self.log.debug("New file under parent OID: {}".format(path.parent))
             if not oid:
                 oid = self.make_directory_tree(str(path.parent),
-                                               object_policy=object_policy)
-            if not object_policy:
+                                               object_policy=object_policy,
+                                               original_object_policy=original_object_policy)
+            if not object_policy or original_object_policy:
                 props_json = self.get_props(path.parent)
-                object_policy = props_json['objectpolicy']
+                if not object_policy and not original_object_policy:
+                    object_policy = props_json['objectpolicy']
+                if not original_object_policy:
+                    original_object_policy = props_json['originalobjectpolicy']
                 self.log.debug("Using assumed OP {} from parent, "
                                "oid {}".format(object_policy, oid))
-            else:
-                object_policy = json.loads(object_policy)
             self.log.debug("Using given OP {} from "
                            "oid {}. Type {}".format(object_policy, oid,
                                                     type(object_policy)))
@@ -319,9 +334,12 @@ class Data:
                 "name": path.name,
                 "parentoid": oid,
                 "isFile": True,
-                "objectpolicy": object_policy,
+                "originalobjectpolicy": original_object_policy,
                 "mimetype": mimetype[0]
             }
+            if object_policy:
+                meta["objectpolicy"] = object_policy
+
             try:
                 if kwargs['security']:
                     meta['security'] = kwargs['security']
@@ -333,7 +351,7 @@ class Data:
         return meta
 
     def upload_file(self, local_filename, data_filename, object_policy=None,
-                    **kwargs):
+                    original_object_policy=None, **kwargs):
         """Upload a file from the local filesystem to GM-Data.
 
         This will upload a file from the local file system to GM-Data.
@@ -347,6 +365,9 @@ class Data:
             If not supplied and updating a file, it will keep what is already in
             Data. If creating a new file and not supplied, it will likely fail
             as a file will be uploaded that cannot be accessed by anyone.
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
         :param kwargs: extra keywords to be set:
             - security - The security tag of the given file. If not supplied
             it will keep what is already there or it will use the field
@@ -360,7 +381,9 @@ class Data:
         self.log.debug("{}".format(type(object_policy)))
         mimetype = mimetypes.guess_type(local_filename)
         meta = self.create_meta(data_filename, local_filename=local_filename,
-                                object_policy=object_policy, **kwargs)
+                                object_policy=object_policy,
+                                original_object_policy=original_object_policy,
+                                **kwargs)
 
         # lets get to writing! Do a multipart upload
         with open(local_filename, 'rb') as f:
@@ -381,7 +404,7 @@ class Data:
         self.log.debug("Headers: {}".format(r.request.headers))
         self.log.debug("Response")
         self.log.debug(r.status_code)
-        self.log.debug(r.json())
+        self.log.debug(r.text)
 
         ok = r.ok
         r.close()
@@ -390,7 +413,8 @@ class Data:
 
         return ok
 
-    def make_directory_tree(self, path, object_policy=None, **kwargs):
+    def make_directory_tree(self, path, object_policy=None,
+                            original_object_policy=None, **kwargs):
         """Recursively create directories in GM Data.
 
         :param path: Path to be created in GM Data
@@ -400,6 +424,9 @@ class Data:
             - security - The security tag of the given file. If not supplied
             it will keep what is already there or it will use the field
             from the parent if creating a new file.
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
         :return: oid on success
         """
         path = Path(path)
@@ -415,6 +442,7 @@ class Data:
                            " parent".format(path.parent))
             self.make_directory_tree(str(path.parent),
                                      object_policy=object_policy,
+                                     original_object_policy=original_object_policy,
                                      **kwargs)
 
         oid = self.find_file(str(path.parent))
@@ -430,8 +458,13 @@ class Data:
         }
 
         if object_policy:
+            body['objectpolicy'] = object_policy
             body['originalobjectpolicy'] = object_policy
-        else:
+        # just overwrite what we just did if we need to
+        if original_object_policy:
+            body['originalobjectpolicy'] = original_object_policy
+        if "objectpolicy" not in body.keys() or\
+                'originalobjectpolicy' not in body.keys():
             prop_json = self.get_props(path.parent)
             self.log.debug("The parsed OP: {}".format(prop_json['objectpolicy']))
             body['objectpolicy'] = prop_json['objectpolicy']
@@ -533,7 +566,8 @@ class Data:
             return a
         return False
 
-    def append_data(self, data, data_filename, object_policy=None):
+    def append_data(self, data, data_filename, object_policy=None,
+                    original_object_policy=None):
         """Append the given filename with the given data in memory
 
         :param data: Data to append to a file. Remember to add line endings
@@ -554,6 +588,7 @@ class Data:
 
         meta = self.create_meta("{}/{}".format(data_filename, part),
                                 object_policy=object_policy,
+                                original_object_policy=original_object_policy,
                                 mimetype=mimetype)
 
         if isinstance(data, str):
@@ -673,7 +708,7 @@ class Data:
         return io.BytesIO(r.content)
 
     def stream_upload_string(self, s, data_filename, object_policy=None,
-                             **kwargs):
+                             original_object_policy=None, **kwargs):
         """Upload a string into file from memory
 
         :param s: Data to upload to a file.
@@ -682,15 +717,18 @@ class Data:
             object with this value or will make a new object with this policy.
             If not supplied for either, it will make a best effort to
             come up with a good response
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
         :return: True on success
         """
         if isinstance(s, str):
             with io.StringIO(s) as f:
                 return self.stream_upload(f, data_filename, object_policy,
-                                          **kwargs)
+                                          original_object_policy, **kwargs)
 
     def stream_upload(self, data_buf, data_filename, object_policy=None,
-                      **kwargs):
+                      original_object_policy=None, **kwargs):
         """Upload a file buffer from memory as a given filename
 
         :param data_buf: Buffer of data to upload to a file.
@@ -698,13 +736,16 @@ class Data:
         :param object_policy: Object Policy to use. Will update an existing
             object with this value or will make a new object with this policy.
             If not supplied for either, it will make a best effort to
-            come up with a good response
+            come up with a good response.
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
         :return: True on success
         """
         self.log.debug("Uploading file {} op {}".format(data_filename,
                                                         object_policy))
-        self.log.debug("{}".format(type(object_policy)))
         meta = self.create_meta(data_filename, object_policy=object_policy,
+                                original_object_policy=original_object_policy,
                                 **kwargs)
 
         mimetype = mimetypes.guess_type(data_filename)
@@ -727,7 +768,7 @@ class Data:
         self.log.debug("Headers: {}".format(r.request.headers))
         self.log.debug("Response")
         self.log.debug(r.status_code)
-        self.log.debug(r.json())
+        self.log.debug(r.text)
         r.close()
 
         if r.ok:
@@ -753,7 +794,11 @@ class Data:
         except KeyError:
             # Maybe it got populated since this class last checked
             self.log.debug("Not found initially, trying to re-populate")
-            self.populate_hierarchy("/")
+            if not self.repopulate:
+                return None
+
+        # Try repopulating the index to see if it is there now
+        self.populate_hierarchy("/")
 
         try:
             oid = self.hierarchy[filename]

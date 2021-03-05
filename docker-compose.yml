@@ -36,6 +36,7 @@ services:
       - KAFKA_PEERS=kafka:9092
       - KAFKA_TOPIC_READ=gmdatax-audit
       - KAFKA_TOPIC_UPDATE=gmdatax-replicationlog
+      - FEATURE_PLAYGROUND=true
     volumes:
       - ./privacy.html:/static/privacy.html
 
