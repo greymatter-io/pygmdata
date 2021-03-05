@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from PIL import Image
 import logging
+from pprint import pprint
 
 
 class Data:
@@ -40,6 +41,9 @@ class Data:
         self.data = None
         self.hierarchy = {}
         self.log = None
+        self.cert = None
+        self.key = None
+        self.trust = False
         level = "warning"
         self.default_security = {"label": "DECIPHER//GMDATA",
                                  "foreground": "#FFFFFF",
@@ -68,7 +72,7 @@ class Data:
         self.set_log_level(level)
 
         try:
-            self.populate_hierarchy("/", 1)
+            self.populate_hierarchy("/")
         except Exception as e:
             self.log.error("Could not populate hierarchy. Check the base_url")
             raise e
@@ -78,14 +82,20 @@ class Data:
 
         :return: json from the config endpoint
         """
-        r = requests.get(self.base_url + "/config")
+        r = requests.get(self.base_url + "/config", headers=self.headers,
+                         cert=(self.cert, self.key), verify=self.trust)
 
         return r.json()
 
     def get_self_idenfify(self, object_policy=None):
         """Identify self and make user directory
 
-        :return:
+        :param object_policy: Object policy to use to create home directory.
+            Make sure that "U" permissions are given, If not supplied it
+            will try to use the policy of the root directory which may
+            not grant the user "U" permissions.
+
+        :return: True if successful
         """
         configs = self.get_config()
         namespace_userfield = configs["GMDATA_NAMESPACE_USERFIELD"]
@@ -109,7 +119,8 @@ class Data:
                 "org":["greymatter.io"]}}
 
         """
-        r = requests.get(self.base_url + "/self", headers=self.headers)
+        r = requests.get(self.base_url + "/self", headers=self.headers,
+                         cert=(self.cert, self.key), verify=self.trust)
         ret = r.text
         r.close()
         return ret
@@ -159,10 +170,12 @@ class Data:
             return None
 
         r = requests.get(self.base_url + '/props/{}'.format(oid),
-                         headers=self.headers)
+                         headers=self.headers,
+                         cert=(self.cert, self.key), verify=self.trust)
+        r.close()
         return r.json()
 
-    def get_list(self, path):
+    def get_list(self, path, oid=None):
         """Get the contents of a given path.
 
         This gives the most recent tstamp by oid. The result is sorted by oid,
@@ -171,27 +184,37 @@ class Data:
         Note: Listings of files will return None
 
         :param path: Directory path that the object is nestled in.
+        :param oid: Object ID of the thing to list
 
         :return: json of listing if it exists, None if not
         """
-        path = Path(path)
-        oid = self.find_file(str(path))
+        if oid:
+            url = self.base_url + '/list/{}'.format(oid)
+        else:
+            path = Path(path)
+            oid = self.find_file(str(path))
 
-        self.log.debug("Looking for listing of: {}, oid {}".format(path, oid))
-        if not oid:
-            if str(path) == path.root:
-                raise Exception('Unable to locate the root directory')
-            self.log.info("Path {} not found, cannot get listing"
-                          "".format(path))
-            return None
+            self.log.debug("Looking for listing of: {}, oid {}".format(path,
+                                                                       oid))
+            url = self.base_url + '/list/{}'.format(oid)
+            if not oid:
+                if str(path) == path.root:
+                    raise Exception('Unable to locate the parent directory')
+                self.log.info("Path {} not found, cannot get listing"
+                              "".format(path))
+                return None
 
-        r = requests.get(self.base_url + '/list/{}'.format(oid),
-                         headers=self.headers)
+        r = requests.get(url, headers=self.headers, cert=(self.cert, self.key),
+                         verify=self.trust)
+        self.log.debug("URL: {}".format(r.request.url))
+        self.log.debug("Body: {}".format(r.request.body))
+        self.log.debug("Headers: {}".format(r.request.headers))
+        r.close()
         if r.ok:
             return r.json()
         return None
 
-    def populate_hierarchy(self, path, oid):
+    def populate_hierarchy(self, path):
         """Populate the internal hierarchy structure.
 
         Every GM Data data object has an Object ID, including directories and
@@ -207,24 +230,23 @@ class Data:
             Always starts out as `/` then builds to `/world` and so forth until
             the entire listing in Data is mapped.
 
-        :param oid: Object ID of the thing to list
         """
-        r = requests.get(self.base_url+"/list/{}/".format(oid),
-                         headers=self.headers)
-        if path == '/':
+        if path == '/' or path == "":
+            list_json = self.get_list(path, oid=1)
             path = ''
-        for j in r.json():
+        else:
+            list_json = self.get_list(path)
+        for j in list_json:
             filepath = "{}/{}".format(path, j['name'])
-            self.log.debug("path: {}, oid: {}".format(filepath, oid))
             self.hierarchy[filepath] = j['oid']
+            self.log.debug("path: {}, oid: {}".format(filepath, j['oid']))
 
             # stop if it is a file
             try:
                 _ = j['isfile']
                 continue
             except KeyError:
-                self.populate_hierarchy(filepath, j['oid'])
-            r.close()
+                self.populate_hierarchy(filepath)
 
     def create_meta(self, data_filename, object_policy=None,
                     **kwargs):
@@ -260,10 +282,10 @@ class Data:
 
         # make the metadata of the upload, decide if it is an update or create
         if oid:
-            self.log.debug("Found the file for updating. OID: {}".format(oid))
-            r = requests.get(self.base_url+'/props/{}'.format(oid))
-            meta = r.json()
-            meta['action'] = "C"
+            meta = self.get_props(data_filename)
+            self.log.debug("Found the props of a file for updating. "
+                           "OID: {}".format(oid))
+            meta['action'] = "U"
             if object_policy:
                 if isinstance(object_policy, str):
                     meta['objectpolicy'] = json.loads(object_policy)
@@ -274,21 +296,18 @@ class Data:
                     meta['security'] = kwargs['security']
             except KeyError:
                 pass
-            r.close()
         else:
             # get the oid of the parent folder to upload into
             path = Path(data_filename)
             oid = self.find_file(str(path.parent))
-            self.log.debug("New file under parent OID: {}".format(oid))
+            self.log.debug("New file under parent OID: {}".format(path.parent))
             if not oid:
                 oid = self.make_directory_tree(str(path.parent),
                                                object_policy=object_policy)
             if not object_policy:
-                r = requests.get(self.base_url + '/props/{}'.format(oid))
-                meta = r.json()
-                object_policy = meta['objectpolicy']
-                r.close()
-                self.log.debug("Using assumed OP {} from "
+                props_json = self.get_props(path.parent)
+                object_policy = props_json['objectpolicy']
+                self.log.debug("Using assumed OP {} from parent, "
                                "oid {}".format(object_policy, oid))
             else:
                 object_policy = json.loads(object_policy)
@@ -307,11 +326,10 @@ class Data:
                 if kwargs['security']:
                     meta['security'] = kwargs['security']
             except KeyError:
-                r = requests.get(self.base_url+'/props/{}'.format(oid),
-                                 headers=self.headers)
-                meta['security'] = r.json()['security']
-                self.log.debug("Getting security: {}".format(meta['security']))
-                r.close()
+                props_json = self.get_props(path.parent)
+                meta['security'] = props_json['security']
+                self.log.debug("Using security: {}".format(meta['security']))
+
         return meta
 
     def upload_file(self, local_filename, data_filename, object_policy=None,
@@ -355,7 +373,8 @@ class Data:
             headers['Content-length'] = str(os.path.getsize(local_filename))
             headers['Content-Type'] = multipart_data.content_type
             r = requests.post(self.base_url+"/write", data=multipart_data,
-                              headers=headers)
+                              headers=headers, cert=(self.cert, self.key),
+                              verify=self.trust)
         self.log.debug("The sent request")
         self.log.debug("URL: {}".format(r.request.url))
         self.log.debug("Body: {}".format(r.request.body))
@@ -385,6 +404,8 @@ class Data:
         """
         path = Path(path)
         oid = self.find_file(str(path.parent))
+        if isinstance(object_policy, str):
+            object_policy = json.loads(object_policy)
 
         self.log.debug("Looking for {}, oid {}".format(path.parent, oid))
         if not oid:
@@ -411,10 +432,9 @@ class Data:
         if object_policy:
             body['originalobjectpolicy'] = object_policy
         else:
-            r = requests.get(self.base_url+'/props/{}'.format(oid))
-            self.log.debug("The parsed OP: {}".format(r.json()['objectpolicy']))
-            body['objectpolicy'] = r.json()['objectpolicy']
-            r.close()
+            prop_json = self.get_props(path.parent)
+            self.log.debug("The parsed OP: {}".format(prop_json['objectpolicy']))
+            body['objectpolicy'] = prop_json['objectpolicy']
 
         if 'security' in kwargs:
             body['security'] = kwargs['security']
@@ -423,7 +443,8 @@ class Data:
 
         files = {'file': ('meta', json.dumps([body]))}
         r = requests.post(self.base_url + "/write", files=files,
-                          headers=self.headers)
+                          headers=self.headers, cert=(self.cert, self.key),
+                          verify=self.trust)
 
         self.log.debug("The sent request")
         self.log.debug("URL: {}".format(r.request.url))
@@ -437,7 +458,7 @@ class Data:
         r.close()
         if ok:
             oid = r.json()[0]["oid"]
-            self.hierarchy[path] = oid
+            self.hierarchy[path.as_posix()] = oid
             return oid
 
         return False
@@ -449,54 +470,47 @@ class Data:
         :param object_policy: optional object policy to use
         :return: File part like 'aab'
         """
-        part = None
-        if data_filename not in self.hierarchy.keys():
-            oid = self.find_file(data_filename)
-            self.log.debug("Not found in hierarchy. oid {}".format(oid))
-            if not oid:
-                # this does not exist yet
-                # yes, we want a directory named for the file
-                oid = self.make_directory_tree(data_filename,
-                                               object_policy=object_policy)
-                part = "aaa"
-                self.log.debug("File does not exist yet. oid {}".format(oid))
-
+        self.log.debug(self.hierarchy)
+        oid = self.find_file(data_filename)
+        self.log.debug("OID for part: {} {}".format(data_filename, oid))
+        if not oid:
+            # this does not exist yet
+            # yes, we want a directory named for the file
+            oid = self.make_directory_tree(data_filename,
+                                           object_policy=object_policy)
+            self.log.debug("'File' does not exist yet, so created it."
+                           " oid {}".format(oid))
+            self.populate_hierarchy('/')
+            return "aaa"
         else:
             # download and delete the file, rename if it is a file
-            oid = self.hierarchy[data_filename]
             self.log.debug("Found in hierarchy. oid {}".format(oid))
-            r = requests.get(self.base_url+'/props/{}'.format(oid),
-                             headers=self.headers)
+            prop_json = self.get_props(data_filename)
+            self.log.debug("Returned props: {}".format(prop_json))
+            pprint(prop_json)
             try:
-                if r.json()['isfile']:
-                    self.log.debug("It's already a file, using parent's oid")
-                    oid = r.json()['parentoid']
+                if prop_json['isfile']:
+                    self.log.error("It's already a file!! Not implemented!")
+                    return None
             except KeyError:
                 # not a file, this is the oid we want
+                self.log.debug("Got the file we wanted, not is file. "
+                               "OID: {}".format(prop_json['oid']))
                 pass
-            r.close()
-        if not part:
-            # figure out the next part number
-            # start by listing them off
-            r = requests.get(self.base_url+"/list/{}/".format(oid),
-                             headers=self.headers)
-            self.log.debug("The sent request in part")
-            self.log.debug("URL: {}".format(r.request.url))
-            self.log.debug("Body: {}".format(r.request.body))
-            self.log.debug("Headers: {}".format(r.request.headers))
-            # get only the filenames
-            names = [name['name'] for name in r.json() if 'isfile' in name.keys()]
-            r.close()
-            names.sort()
-            self.log.debug("names: {}".format(names))
+        # figure out the next part number
+        # start by listing them off
+        resp_json = self.get_list(data_filename)
+        self.log.debug("The listing: {}".format(resp_json))
+        # get only the filenames
+        names = [name['name'] for name in resp_json if 'isfile' in name.keys()]
+        names.sort()
+        self.log.debug("names: {}".format(names))
 
-            # take the last one and increment it
-            if len(names) == 0:
-                return "aaa"
-            else:
-                return self._increment_str(names[-1].split(".")[0])
-
-        return part
+        # take the last one and increment it
+        if len(names) == 0:
+            return "aaa"
+        else:
+            return self._increment_str(names[-1].split(".")[0])
 
     def append_file(self, local_filename, data_filename, object_policy=None):
         """Append an uploaded file with another file on disk
@@ -512,9 +526,12 @@ class Data:
         """
         part = self.get_part(data_filename, object_policy=object_policy)
 
-        a = self.upload_file(local_filename, "{}/{}".format(data_filename, part),
-                             object_policy=object_policy)
-        return a
+        if part:
+            a = self.upload_file(local_filename, "{}/{}".format(data_filename,
+                                                                part),
+                                 object_policy=object_policy)
+            return a
+        return False
 
     def append_data(self, data, data_filename, object_policy=None):
         """Append the given filename with the given data in memory
@@ -530,6 +547,9 @@ class Data:
         """
         part = self.get_part(data_filename, object_policy=object_policy)
 
+        if not part:
+            self.log.warning("Did not get a good part back to append!")
+            return False
         mimetype = mimetypes.guess_type(data_filename)
 
         meta = self.create_meta("{}/{}".format(data_filename, part),
@@ -546,9 +566,6 @@ class Data:
 
                 headers = copy.copy(self.headers)
                 headers['Content-Type'] = multipart_data.content_type
-                r = requests.post(self.base_url + "/write", data=multipart_data,
-                                  headers=headers)
-
         else:
             with io.BytesIO(data) as f:
                 multipart_data = MultipartEncoder(
@@ -559,8 +576,9 @@ class Data:
 
                 headers = copy.copy(self.headers)
                 headers['Content-Type'] = multipart_data.content_type
-                r = requests.post(self.base_url + "/write", data=multipart_data,
-                                  headers=headers)
+        r = requests.post(self.base_url + "/write", data=multipart_data,
+                          headers=headers, cert=(self.cert, self.key),
+                          verify=self.trust)
 
         self.log.debug("The append_data sent request")
         self.log.debug("URL: {}".format(r.request.url))
@@ -569,11 +587,9 @@ class Data:
         self.log.debug("Response")
         self.log.debug(r.status_code)
         self.log.debug(r.json())
-        r.close()
-        f.flush()
 
         if r.ok:
-            self.hierarchy[data_filename] = r.json()[0]["oid"]
+            self.populate_hierarchy('/')
 
         return r.ok
 
@@ -592,7 +608,9 @@ class Data:
         oid = self.find_file(file)
         if oid:
             with requests.get(self.base_url+"/stream/{}".format(oid),
-                              headers=self.headers, stream=True) as r:
+                              headers=self.headers, stream=True,
+                              cert=(self.cert, self.key),
+                              verify=self.trust) as r:
                 r.raise_for_status()
                 with open(local_filename, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=chunk_size):
@@ -611,7 +629,8 @@ class Data:
 
         if oid:
             r = requests.get(self.base_url+"/stream/{}".format(oid),
-                             headers=self.headers, stream=True)
+                             headers=self.headers, stream=True,
+                             cert=(self.cert, self.key), verify=self.trust)
             r.raise_for_status()
             r.raw.decode_content = True
             return io.BytesIO(r.content)
@@ -627,6 +646,7 @@ class Data:
         - `image/jpeg` return a PIL image
         - `application/json` return a dictionary in json format
         - `text/plain` return decoded text of object
+        - Anything else return a buffer of the content
 
         :param file: File name within GM-Data to download
         :return: Object
@@ -638,7 +658,8 @@ class Data:
             return None
 
         r = requests.get(self.base_url+"/stream/{}".format(oid),
-                         headers=self.headers, stream=True)
+                         headers=self.headers, stream=True,
+                         cert=(self.cert, self.key), verify=self.trust)
         r.raise_for_status()
         r.raw.decode_content = True
 
@@ -651,7 +672,8 @@ class Data:
             return r.content.decode()
         return io.BytesIO(r.content)
 
-    def stream_upload_string(self, s, data_filename, object_policy=None, **kwargs):
+    def stream_upload_string(self, s, data_filename, object_policy=None,
+                             **kwargs):
         """Upload a string into file from memory
 
         :param s: Data to upload to a file.
@@ -696,7 +718,8 @@ class Data:
         headers = copy.copy(self.headers)
         headers['Content-Type'] = multipart_data.content_type
         r = requests.post(self.base_url + "/write", data=multipart_data,
-                          headers=headers)
+                          headers=headers, cert=(self.cert, self.key),
+                          verify=self.trust)
 
         self.log.debug("The append_data sent request")
         self.log.debug("URL: {}".format(r.request.url))
@@ -729,12 +752,14 @@ class Data:
             return oid
         except KeyError:
             # Maybe it got populated since this class last checked
-            self.populate_hierarchy("/", 1)
+            self.log.debug("Not found initially, trying to re-populate")
+            self.populate_hierarchy("/")
 
         try:
             oid = self.hierarchy[filename]
             return oid
         except KeyError:
+            self.log.debug("Nothing matching that filename found")
             return None
 
     @staticmethod
