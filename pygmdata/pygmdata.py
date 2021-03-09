@@ -6,10 +6,13 @@ import requests
 from requests_toolbelt import MultipartEncoder
 import mimetypes
 import json
+from json import JSONDecodeError
 from pathlib import Path
 from PIL import Image
 import logging
-from pprint import pprint
+import urllib3
+# Does not see DI2E as a valid signing authority so suppress that warning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Data:
@@ -287,19 +290,24 @@ class Data:
         if isinstance(object_policy, str):
             object_policy = json.loads(object_policy)
 
+        self.log.debug("data file is: {}".format(data_filename))
+        mimetype = mimetypes.guess_type(data_filename)[0]
+        self.log.debug("Mimetype based on target file: {}".format(mimetype))
         if "mimetype" in kwargs.keys():
             mimetype = kwargs["mimetype"]
         elif "local_filename" in kwargs.keys():
-            mimetype = mimetypes.guess_type(kwargs["local_filename"])
-        else:
-            mimetype = mimetypes.guess_type(data_filename)
-
+            local_type = mimetypes.guess_type(kwargs["local_filename"])[0]
+            if local_type is not None:
+                self.log.debug("Guessing type from local: {}".format(local_type))
+                mimetype = local_type
+        self.log.debug("The determined mimetype is: {}".format(mimetype))
         # make the metadata of the upload, decide if it is an update or create
         if oid:
             meta = self.get_props(data_filename)
             self.log.debug("Found the props of a file for updating. "
                            "OID: {}".format(oid))
             meta['action'] = "U"
+            meta['mimetype'] = mimetype
             if object_policy:
                 meta['objectpolicy'] = object_policy
             if original_object_policy:
@@ -323,19 +331,22 @@ class Data:
                 if not object_policy and not original_object_policy:
                     object_policy = props_json['objectpolicy']
                 if not original_object_policy:
-                    original_object_policy = props_json['originalobjectpolicy']
+                    try:
+                        original_object_policy = props_json['originalobjectpolicy']
+                    except KeyError:
+                        self.log.info("No original object policy found.")
+                        original_object_policy = ""
                 self.log.debug("Using assumed OP {} from parent, "
                                "oid {}".format(object_policy, oid))
             self.log.debug("Using given OP {} from "
-                           "oid {}. Type {}".format(object_policy, oid,
-                                                    type(object_policy)))
+                           "oid {}".format(object_policy, oid))
             meta = {
                 "action": "C",
                 "name": path.name,
                 "parentoid": oid,
                 "isFile": True,
                 "originalobjectpolicy": original_object_policy,
-                "mimetype": mimetype[0]
+                "mimetype": mimetype
             }
             if object_policy:
                 meta["objectpolicy"] = object_policy
@@ -379,11 +390,13 @@ class Data:
                                                               data_filename,
                                                               object_policy))
         self.log.debug("{}".format(type(object_policy)))
-        mimetype = mimetypes.guess_type(local_filename)
+        mimetype = mimetypes.guess_type(data_filename)
         meta = self.create_meta(data_filename, local_filename=local_filename,
                                 object_policy=object_policy,
                                 original_object_policy=original_object_policy,
                                 **kwargs)
+
+        self.log.debug("Returned Metadata: {}".format(meta))
 
         # lets get to writing! Do a multipart upload
         with open(local_filename, 'rb') as f:
@@ -520,7 +533,6 @@ class Data:
             self.log.debug("Found in hierarchy. oid {}".format(oid))
             prop_json = self.get_props(data_filename)
             self.log.debug("Returned props: {}".format(prop_json))
-            pprint(prop_json)
             try:
                 if prop_json['isfile']:
                     self.log.error("It's already a file!! Not implemented!")
@@ -619,14 +631,16 @@ class Data:
         self.log.debug("URL: {}".format(r.request.url))
         self.log.debug("Body: {}".format(r.request.body))
         self.log.debug("Headers: {}".format(r.request.headers))
-        self.log.debug("Response")
-        self.log.debug(r.status_code)
-        self.log.debug(r.json())
 
-        if r.ok:
-            self.populate_hierarchy('/')
-
-        return r.ok
+        try:
+            self.log.debug("Response")
+            self.log.debug(r.status_code)
+            self.log.debug(r.json())
+            if r.ok:
+                self.populate_hierarchy('/')
+            return r.ok
+        except JSONDecodeError:
+            return False
 
     def download_file(self, file, local_filename, chunk_size=8192):
         """Downloads a file onto the local file system.
