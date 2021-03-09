@@ -596,7 +596,7 @@ class Data:
         if not part:
             self.log.warning("Did not get a good part back to append!")
             return False
-        mimetype = mimetypes.guess_type(data_filename)
+        mimetype = mimetypes.guess_type(data_filename)[0]
 
         meta = self.create_meta("{}/{}".format(data_filename, part),
                                 object_policy=object_policy,
@@ -608,7 +608,7 @@ class Data:
                 multipart_data = MultipartEncoder(
                     fields={"meta": json.dumps([meta]),
                             "blob": ("{}/{}".format(data_filename, part),
-                                     f, mimetype[0])}
+                                     f, mimetype)}
                 )
 
                 headers = copy.copy(self.headers)
@@ -618,7 +618,7 @@ class Data:
                 multipart_data = MultipartEncoder(
                     fields={"meta": json.dumps([meta]),
                             "blob": ("{}/{}".format(data_filename, part),
-                                     f, mimetype[0])}
+                                     f, mimetype)}
                 )
 
                 headers = copy.copy(self.headers)
@@ -668,7 +668,7 @@ class Data:
         else:
             self.log.warning("Cannot find file in GM-Data to download.")
 
-    def get_buffered_steam(self, file):
+    def get_byte_steam(self, file):
         """Get a file as a data stream into memory
 
         :param file: File name within GM-Data to download
