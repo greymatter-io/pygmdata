@@ -6,10 +6,13 @@ import requests
 from requests_toolbelt import MultipartEncoder
 import mimetypes
 import json
+from json import JSONDecodeError
 from pathlib import Path
 from PIL import Image
 import logging
-from pprint import pprint
+import urllib3
+# Does not see DI2E as a valid signing authority so suppress that warning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Data:
@@ -181,8 +184,9 @@ class Data:
         r = requests.get(self.base_url + '/props/{}'.format(oid),
                          headers=self.headers,
                          cert=(self.cert, self.key), verify=self.trust)
-        r.close()
-        return r.json()
+        if r.ok:
+            return r.json()
+        return False
 
     def get_list(self, path, oid=None):
         """Get the contents of a given path.
@@ -287,19 +291,24 @@ class Data:
         if isinstance(object_policy, str):
             object_policy = json.loads(object_policy)
 
+        self.log.debug("data file is: {}".format(data_filename))
+        mimetype = mimetypes.guess_type(data_filename)[0]
+        self.log.debug("Mimetype based on target file: {}".format(mimetype))
         if "mimetype" in kwargs.keys():
             mimetype = kwargs["mimetype"]
         elif "local_filename" in kwargs.keys():
-            mimetype = mimetypes.guess_type(kwargs["local_filename"])
-        else:
-            mimetype = mimetypes.guess_type(data_filename)
-
+            local_type = mimetypes.guess_type(kwargs["local_filename"])[0]
+            if local_type is not None:
+                self.log.debug("Guessing type from local: {}".format(local_type))
+                mimetype = local_type
+        self.log.debug("The determined mimetype is: {}".format(mimetype))
         # make the metadata of the upload, decide if it is an update or create
         if oid:
             meta = self.get_props(data_filename)
             self.log.debug("Found the props of a file for updating. "
                            "OID: {}".format(oid))
             meta['action'] = "U"
+            meta['mimetype'] = mimetype
             if object_policy:
                 meta['objectpolicy'] = object_policy
             if original_object_policy:
@@ -323,19 +332,22 @@ class Data:
                 if not object_policy and not original_object_policy:
                     object_policy = props_json['objectpolicy']
                 if not original_object_policy:
-                    original_object_policy = props_json['originalobjectpolicy']
+                    try:
+                        original_object_policy = props_json['originalobjectpolicy']
+                    except KeyError:
+                        self.log.info("No original object policy found.")
+                        original_object_policy = ""
                 self.log.debug("Using assumed OP {} from parent, "
                                "oid {}".format(object_policy, oid))
             self.log.debug("Using given OP {} from "
-                           "oid {}. Type {}".format(object_policy, oid,
-                                                    type(object_policy)))
+                           "oid {}".format(object_policy, oid))
             meta = {
                 "action": "C",
                 "name": path.name,
                 "parentoid": oid,
                 "isFile": True,
                 "originalobjectpolicy": original_object_policy,
-                "mimetype": mimetype[0]
+                "mimetype": mimetype
             }
             if object_policy:
                 meta["objectpolicy"] = object_policy
@@ -379,11 +391,13 @@ class Data:
                                                               data_filename,
                                                               object_policy))
         self.log.debug("{}".format(type(object_policy)))
-        mimetype = mimetypes.guess_type(local_filename)
+        mimetype = mimetypes.guess_type(data_filename)
         meta = self.create_meta(data_filename, local_filename=local_filename,
                                 object_policy=object_policy,
                                 original_object_policy=original_object_policy,
                                 **kwargs)
+
+        self.log.debug("Returned Metadata: {}".format(meta))
 
         # lets get to writing! Do a multipart upload
         with open(local_filename, 'rb') as f:
@@ -485,7 +499,7 @@ class Data:
         self.log.debug("Headers: {}".format(r.request.headers))
         self.log.debug("Response")
         self.log.debug(r.status_code)
-        self.log.debug(r.raw)
+        self.log.debug(r.text)
 
         ok = r.ok
         r.close()
@@ -496,54 +510,54 @@ class Data:
 
         return False
 
-    def get_part(self, data_filename, object_policy=None):
+    def get_part(self, data_filename, object_policy=None,
+                 original_object_policy=None):
         """Get the file part append for a multi part file
-
         :param data_filename: Filename in GM Data
         :param object_policy: optional object policy to use
         :return: File part like 'aab'
         """
-        self.log.debug(self.hierarchy)
-        oid = self.find_file(data_filename)
-        self.log.debug("OID for part: {} {}".format(data_filename, oid))
-        if not oid:
-            # this does not exist yet
-            # yes, we want a directory named for the file
-            oid = self.make_directory_tree(data_filename,
-                                           object_policy=object_policy)
-            self.log.debug("'File' does not exist yet, so created it."
-                           " oid {}".format(oid))
-            self.populate_hierarchy('/')
-            return "aaa"
+        part = None
+        if data_filename not in self.hierarchy.keys():
+            oid = self.find_file(data_filename)
+            self.log.debug("Not found in hierarchy. oid {}".format(oid))
+            if not oid:
+                # this does not exist yet
+                # yes, we want a directory named for the file
+                oid = self.make_directory_tree(data_filename,
+                                               object_policy=object_policy,
+                                               original_object_policy=original_object_policy)
+                return "aaa"
         else:
-            # download and delete the file, rename if it is a file
-            self.log.debug("Found in hierarchy. oid {}".format(oid))
             prop_json = self.get_props(data_filename)
-            self.log.debug("Returned props: {}".format(prop_json))
-            pprint(prop_json)
-            try:
-                if prop_json['isfile']:
-                    self.log.error("It's already a file!! Not implemented!")
-                    return None
-            except KeyError:
-                # not a file, this is the oid we want
-                self.log.debug("Got the file we wanted, not is file. "
-                               "OID: {}".format(prop_json['oid']))
-                pass
-        # figure out the next part number
-        # start by listing them off
-        resp_json = self.get_list(data_filename)
-        self.log.debug("The listing: {}".format(resp_json))
-        # get only the filenames
-        names = [name['name'] for name in resp_json if 'isfile' in name.keys()]
-        names.sort()
-        self.log.debug("names: {}".format(names))
+            oid = prop_json["oid"]
+            self.log.debug("Found in hierarchy. oid {}".format(oid))
+            # try:
+            #     if prop_json['isfile']:
+            #         self.log.debug("It's already a file, using parent's oid")
+            #         self.log.debug("using this json: {}".format(prop_json))
+            #         oid = prop_json['parentoid']
+            # except KeyError:
+            #     # download and delete the file, rename if it is a file
+            #     # not a file, this is the oid we want
+            #     pass
+        if not part:
+            # figure out the next part number
+            # start by listing them off
+            list_json = self.get_list(data_filename, oid=oid)
+            self.log.debug("The listing: {}".format(list_json))
 
-        # take the last one and increment it
-        if len(names) == 0:
-            return "aaa"
-        else:
-            return self._increment_str(names[-1].split(".")[0])
+            # get only the filenames
+            names = [name['name'] for name in list_json if 'isfile' in name.keys()]
+            names.sort()
+            self.log.debug("names: {}".format(names))
+
+            # take the last one and increment it
+            if len(names) == 0:
+                return "aaa"
+            else:
+                self.log.debug("Names so far: {}".format(names[-1].split(".")[0]))
+                return self._increment_str(names[-1].split(".")[0])
 
     def append_file(self, local_filename, data_filename, object_policy=None):
         """Append an uploaded file with another file on disk
@@ -584,7 +598,8 @@ class Data:
         if not part:
             self.log.warning("Did not get a good part back to append!")
             return False
-        mimetype = mimetypes.guess_type(data_filename)
+        full_name = "{}/{}".format(data_filename, part)
+        mimetype = mimetypes.guess_type(data_filename)[0]
 
         meta = self.create_meta("{}/{}".format(data_filename, part),
                                 object_policy=object_policy,
@@ -595,8 +610,7 @@ class Data:
             with io.StringIO(data) as f:
                 multipart_data = MultipartEncoder(
                     fields={"meta": json.dumps([meta]),
-                            "blob": ("{}/{}".format(data_filename, part),
-                                     f, mimetype[0])}
+                            "blob": (full_name, f, mimetype)}
                 )
 
                 headers = copy.copy(self.headers)
@@ -605,8 +619,7 @@ class Data:
             with io.BytesIO(data) as f:
                 multipart_data = MultipartEncoder(
                     fields={"meta": json.dumps([meta]),
-                            "blob": ("{}/{}".format(data_filename, part),
-                                     f, mimetype[0])}
+                            "blob": (full_name, f, mimetype)}
                 )
 
                 headers = copy.copy(self.headers)
@@ -619,14 +632,22 @@ class Data:
         self.log.debug("URL: {}".format(r.request.url))
         self.log.debug("Body: {}".format(r.request.body))
         self.log.debug("Headers: {}".format(r.request.headers))
-        self.log.debug("Response")
-        self.log.debug(r.status_code)
-        self.log.debug(r.json())
 
-        if r.ok:
-            self.populate_hierarchy('/')
-
-        return r.ok
+        try:
+            self.log.debug("Response")
+            self.log.debug(r.status_code)
+            self.log.debug(r.json())
+            if r.ok:
+                if not self.repopulate:
+                    new_id = r.json()[0]["oid"]
+                    self.log.debug("Adding {}:{} to hierarchy without populating"
+                                   "".format(full_name, new_id))
+                    self.hierarchy[full_name] = new_id
+                    return r.ok
+                self.populate_hierarchy('/')
+            return r.ok
+        except JSONDecodeError:
+            return False
 
     def download_file(self, file, local_filename, chunk_size=8192):
         """Downloads a file onto the local file system.
@@ -654,7 +675,7 @@ class Data:
         else:
             self.log.warning("Cannot find file in GM-Data to download.")
 
-    def get_buffered_steam(self, file):
+    def get_byte_steam(self, file):
         """Get a file as a data stream into memory
 
         :param file: File name within GM-Data to download
@@ -678,7 +699,7 @@ class Data:
         Look at the Content-Type header and parse the returned variable
         accordingly:
 
-        - `image/jpeg` return a PIL image
+        - `image/*` return a PIL image
         - `application/json` return a dictionary in json format
         - `text/plain` return decoded text of object
         - Anything else return a buffer of the content
@@ -698,7 +719,7 @@ class Data:
         r.raise_for_status()
         r.raw.decode_content = True
 
-        if r.headers['Content-Type'] == 'image/jpeg':
+        if "image" in r.headers['Content-Type']:
             im = Image.open(r.raw)
             return im
         if r.headers['Content-Type'] == 'application/json':
