@@ -229,13 +229,38 @@ class Data:
             return r.json()
         return None
 
+    def get_derived(self, data_filename, oid=None):
+        """Get the derived files from a given filename
+
+        :param data_filename: Path to the object to be deleted.
+        :param oid: Object ID of the thing to properties of):
+
+        :return: json of derived listing
+        """
+        path = Path(data_filename)
+
+        if oid:
+            url = self.base_url + '/derived/{}'.format(oid)
+        else:
+            path = Path(path)
+            oid = self.find_file(str(path))
+
+            self.log.debug("Looking for derived files of: {},"
+                           " oid {}".format(path, oid))
+            url = self.base_url + '/derived/{}'.format(oid)
+
+        r = requests.get(url, headers=self.headers, cert=(self.cert, self.key),
+                         verify=self.trust)
+
+        return r.json()
+
     def delete_file(self, data_filename, oid=None):
         """Delete a file from GM Data
 
         :param data_filename: Path to the object to be deleted.
         :param oid: Object ID of the thing to properties of
 
-
+        :return: True on delete success, False on Failure
         """
         path = Path(data_filename)
 

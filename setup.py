@@ -29,7 +29,9 @@ setup(
     python_requires='>=3.6',
     packages=["pygmdata"],
     include_package_data=True,
-    install_requires=["requests", "requests_toolbelt"],
+    install_requires=["requests>=2.25.1",
+                      "requests_toolbelt>=0.9.1",
+                      "Pillow>=7.2.0"],
     entry_points={
         "console_scripts": [
             "pygmdata=pygmdata.__main__:main",
