@@ -14,9 +14,9 @@ Installing pygmdata
 *******************
 
 Installing the pygmdata library is extremely easy.
-The package is in PyPy and can be installed with ::
+The package is currently in PyPi test and can be installed with ::
 
-    pip install pygmdata
+    pip install -i https://test.pypi.org/simple/ pygmdata
 
 
 Verify Installation

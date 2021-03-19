@@ -137,12 +137,13 @@ class Data:
         r.close()
         return ret
 
-    def get_props(self, path):
+    def get_props(self, path, oid=None):
         """Get the properties of a given Data object.
 
         This essentially returns the metadata of a given object in Data.
 
         :param path: Directory path that the object is nestled in.
+        :param oid: Object ID of the thing to properties of
 
         :return: json of properties if it exists, None if not.
             ::
@@ -171,7 +172,8 @@ class Data:
                  'cluster': 'default'}
         """
         path = Path(path)
-        oid = self.find_file(str(path))
+        if not oid:
+            oid = self.find_file(str(path))
 
         self.log.debug("Looking for props of: {}, oid {}".format(path, oid))
         if not oid:
@@ -227,7 +229,48 @@ class Data:
             return r.json()
         return None
 
-    def populate_hierarchy(self, path):
+    def delete_file(self, data_filename, oid=None):
+        """Delete a file from GM Data
+
+        :param data_filename: Path to the object to be deleted.
+        :param oid: Object ID of the thing to properties of
+
+
+        """
+        path = Path(data_filename)
+
+        meta = self.get_props(path, oid=oid)
+
+        meta["action"] = "D"
+
+        self.log.debug("Meta data for delete of {}: {}".format(data_filename,
+                                                               meta))
+
+        multipart_data = MultipartEncoder(fields={"meta": json.dumps([meta])})
+
+        headers = copy.copy(self.headers)
+        headers['Content-length'] = str(multipart_data.len)
+        headers['Content-Type'] = multipart_data.content_type
+
+        r = requests.post(self.base_url + "/write", data=multipart_data,
+                          headers=headers, cert=(self.cert, self.key),
+                          verify=self.trust)
+
+        self.log.debug("The sent request")
+        self.log.debug("URL: {}".format(r.request.url))
+        self.log.debug("Body: {}".format(r.request.body))
+        self.log.debug("Headers: {}".format(r.request.headers))
+        self.log.debug("Response")
+        self.log.debug(r.status_code)
+        self.log.debug(r.text)
+
+        ok = r.ok
+        r.close()
+        if ok:
+            self.hierarchy.pop(data_filename)
+        return ok
+
+    def populate_hierarchy(self, path, refresh=True):
         """Populate the internal hierarchy structure.
 
         Every GM Data data object has an Object ID, including directories and
@@ -242,8 +285,10 @@ class Data:
             in the internal hierarchy dictionary.
             Always starts out as `/` then builds to `/world` and so forth until
             the entire listing in Data is mapped.
-
+        :param refresh: Delete the old hierarchy and start from scratch
         """
+        if refresh:
+            self.hierarchy = {}
         if path == '/' or path == "":
             list_json = self.get_list(path, oid=1)
             path = ''
@@ -259,7 +304,7 @@ class Data:
                 _ = j['isfile']
                 continue
             except KeyError:
-                self.populate_hierarchy(filepath)
+                self.populate_hierarchy(filepath, refresh=False)
 
     def create_meta(self, data_filename, object_policy=None,
                     original_object_policy=None, **kwargs):
