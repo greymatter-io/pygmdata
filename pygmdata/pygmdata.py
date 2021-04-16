@@ -144,13 +144,14 @@ class Data:
         r.close()
         return ret
 
-    def get_props(self, path, oid=None):
+    def get_props(self, path=None, oid=None):
         """Get the properties of a given Data object.
 
         This essentially returns the metadata of a given object in Data.
 
         :param path: Directory path that the object is nestled in.
-        :param oid: Object ID of the thing to properties of
+        :param oid: Object ID of the thing to properties of, if this is
+            supplied it ignores the path
 
         :return: json of properties if it exists, None if not.
             ::
@@ -178,7 +179,8 @@ class Data:
                  'policy': {'policy': ['R', 'X']},
                  'cluster': 'default'}
         """
-        path = Path(path)
+        if path:
+            path = Path(path)
         if not oid:
             oid = self.find_file(str(path))
 
@@ -464,7 +466,33 @@ class Data:
 
         for key, value in kwargs.items():
             if key in self.events:
-                meta[key] = value
+                self.log.debug("Looking at {}: {}".format(key, value))
+                # if doing derived files we need to get the OID and timestamp
+                if key == 'derived':
+                    # supplied a dictionary directly, just use that
+                    if isinstance(value, dict):
+                        meta['derived'] = value
+                        continue
+                    # look to see if it is a filename or oid
+                    if "/" in value:
+                        doid = self.find_file(value)
+                    else:
+                        doid = value
+                    self.log.debug("Creating a derived listing "
+                                   "from: {}".format(doid))
+                    # now get the timestamp
+                    d_props = self.get_props(oid=doid)
+
+                    # ToDo Update for derived dtype
+                    derived_meta = {
+                        "oid": doid,
+                        "tstamp": d_props["tstamp"],
+                        "dtype": "DerivedFromFile"
+                    }
+
+                    meta['derived'] = derived_meta
+                else:
+                    meta[key] = value
 
         return meta
 
