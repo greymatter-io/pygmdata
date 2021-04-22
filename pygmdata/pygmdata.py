@@ -55,6 +55,13 @@ class Data:
         self.default_security = {"label": "DECIPHER//GMDATA",
                                  "foreground": "#FFFFFF",
                                  "background": "green"}
+        # The allowable types of events that can be added to an object
+        self.events = ["action", "blobalgorithm", "checkedtstamp", "custom",
+                       "defaultfile", "derived", "description", "encrypted",
+                       "expiration", "isfile", "mimetype", "name",
+                       "objectpolicy", "oid", "parentoid", "purgetstamp",
+                       "references", "rname", "schema", "security",
+                       "sha256plain", "size", "tstamp", "userpolicy"]
 
         for key, value in kwargs.items():
             if "user_dn" == key.lower():
@@ -137,13 +144,14 @@ class Data:
         r.close()
         return ret
 
-    def get_props(self, path, oid=None):
+    def get_props(self, path=None, oid=None):
         """Get the properties of a given Data object.
 
         This essentially returns the metadata of a given object in Data.
 
         :param path: Directory path that the object is nestled in.
-        :param oid: Object ID of the thing to properties of
+        :param oid: Object ID of the thing to properties of, if this is
+            supplied it ignores the path
 
         :return: json of properties if it exists, None if not.
             ::
@@ -171,7 +179,8 @@ class Data:
                  'policy': {'policy': ['R', 'X']},
                  'cluster': 'default'}
         """
-        path = Path(path)
+        if path:
+            path = Path(path)
         if not oid:
             oid = self.find_file(str(path))
 
@@ -254,30 +263,21 @@ class Data:
 
         return r.json()
 
-    def delete_file(self, data_filename, oid=None):
-        """Delete a file from GM Data
+    def post_write(self, data, headers=None):
+        """Send a request to the `/write` endpoint
 
-        :param data_filename: Path to the object to be deleted.
-        :param oid: Object ID of the thing to properties of
+        :param data: The data to be uploaded, this needs to be a
+            MultipartEncoder data type.
+        :param headers: Any custom headers to be submitted. If this is
+            not supplied it will use whatever is in self.headers. If it
+            is supplied, it will only use those headers
 
-        :return: True on delete success, False on Failure
+        :return: OID of object on write success, False on Failure
         """
-        path = Path(data_filename)
+        if not headers:
+            headers = self.headers
 
-        meta = self.get_props(path, oid=oid)
-
-        meta["action"] = "D"
-
-        self.log.debug("Meta data for delete of {}: {}".format(data_filename,
-                                                               meta))
-
-        multipart_data = MultipartEncoder(fields={"meta": json.dumps([meta])})
-
-        headers = copy.copy(self.headers)
-        headers['Content-length'] = str(multipart_data.len)
-        headers['Content-Type'] = multipart_data.content_type
-
-        r = requests.post(self.base_url + "/write", data=multipart_data,
+        r = requests.post(self.base_url + "/write", data=data,
                           headers=headers, cert=(self.cert, self.key),
                           verify=self.trust)
 
@@ -290,10 +290,18 @@ class Data:
         self.log.debug(r.text)
 
         ok = r.ok
+        self.log.debug("Is it ok? {}".format(ok))
+
+        try:
+            ret_json = r.json()[0]["oid"]
+        except KeyError as err:
+            self.log.info("Was not able to write")
+            return False
         r.close()
-        if ok:
-            self.hierarchy.pop(data_filename)
-        return ok
+
+        self.log.debug("We are returning: {}".format(ret_json))
+        self.log.debug("Closed")
+        return ret_json
 
     def populate_hierarchy(self, path, refresh=True):
         """Populate the internal hierarchy structure.
@@ -331,6 +339,8 @@ class Data:
             except KeyError:
                 self.populate_hierarchy(filepath, refresh=False)
 
+# Metadata helper
+
     def create_meta(self, data_filename, object_policy=None,
                     original_object_policy=None, **kwargs):
         """Create the meta data for an object to be uploaded
@@ -353,9 +363,16 @@ class Data:
             from the parent if creating a new file.
             - mimetype - Mimetype to be used as a header value to be uploaded.
             If not supplied it will make it's best guess at the value.
+            - Anything that is in the allowable events. If updating a file
+            these values will be used to superceed what is already in
+            the props for that object. If creating a new file, `action`,
+            `name`, `parentoid`, `isFile`, `originalobjectpolicy` (if supplied,
+            see above for object_policy and original_object_policy),
+            and `mimetype` (also see above) are all overwritten.
         :return: Metadata dictionary
         """
         self.log.debug("Create Metadata object_policy {}".format(object_policy))
+
         # check to see if it exists. If so, it is an update else create
         oid = self.find_file(data_filename)
         if isinstance(object_policy, str):
@@ -372,9 +389,14 @@ class Data:
                 self.log.debug("Guessing type from local: {}".format(local_type))
                 mimetype = local_type
         self.log.debug("The determined mimetype is: {}".format(mimetype))
+
+        parse_meta = self.parse_events(**kwargs)
+
         # make the metadata of the upload, decide if it is an update or create
         if oid:
             meta = self.get_props(data_filename)
+            for key, value in parse_meta.items():
+                meta[key] = value
             self.log.debug("Found the props of a file for updating. "
                            "OID: {}".format(oid))
             meta['action'] = "U"
@@ -388,6 +410,7 @@ class Data:
                     meta['security'] = kwargs['security']
             except KeyError:
                 pass
+        # It doesn't exist, create a new file
         else:
             # get the oid of the parent folder to upload into
             path = Path(data_filename)
@@ -411,14 +434,13 @@ class Data:
                                "oid {}".format(object_policy, oid))
             self.log.debug("Using given OP {} from "
                            "oid {}".format(object_policy, oid))
-            meta = {
-                "action": "C",
-                "name": path.name,
-                "parentoid": oid,
-                "isFile": True,
-                "originalobjectpolicy": original_object_policy,
-                "mimetype": mimetype
-            }
+            meta = parse_meta
+            meta["action"] = "C"
+            meta["name"] = path.name
+            meta["parentoid"] = oid
+            meta["isFile"] = True
+            meta["originalobjectpolicy"] = original_object_policy
+            meta["mimetype"] = mimetype
             if object_policy:
                 meta["objectpolicy"] = object_policy
 
@@ -431,6 +453,78 @@ class Data:
                 self.log.debug("Using security: {}".format(meta['security']))
 
         return meta
+
+    def parse_events(self, **kwargs):
+        """Parse the given keyword arguments into a dictionary
+
+        Looks through the keywords to match up what is in allowable events,
+        if an event is found add it to the returned meta
+
+        :return: metadata dictionary associated with the events in kwargs
+        """
+        meta = {}
+
+        for key, value in kwargs.items():
+            if key in self.events:
+                self.log.debug("Looking at {}: {}".format(key, value))
+                # if doing derived files we need to get the OID and timestamp
+                if key == 'derived':
+                    # supplied a dictionary directly, just use that
+                    if isinstance(value, dict):
+                        meta['derived'] = value
+                        continue
+                    # look to see if it is a filename or oid
+                    if "/" in value:
+                        doid = self.find_file(value)
+                    else:
+                        doid = value
+                    self.log.debug("Creating a derived listing "
+                                   "from: {}".format(doid))
+                    # now get the timestamp
+                    d_props = self.get_props(oid=doid)
+
+                    # ToDo Update for derived dtype
+                    derived_meta = {
+                        "oid": doid,
+                        "tstamp": d_props["tstamp"],
+                        "dtype": "DerivedFromFile"
+                    }
+
+                    meta['derived'] = derived_meta
+                else:
+                    meta[key] = value
+
+        return meta
+
+# Now do some file manipulation
+
+    def delete_file(self, data_filename, oid=None):
+        """Delete a file from GM Data
+
+        :param data_filename: Path to the object to be deleted.
+        :param oid: Object ID of the thing to properties of
+
+        :return: True on delete success, False on Failure
+        """
+        path = Path(data_filename)
+
+        meta = self.get_props(path, oid=oid)
+
+        meta["action"] = "D"
+
+        self.log.debug("Meta data for delete of {}: {}".format(data_filename,
+                                                               meta))
+
+        multipart_data = MultipartEncoder(fields={"meta": json.dumps([meta])})
+
+        headers = copy.copy(self.headers)
+        headers['Content-length'] = str(multipart_data.len)
+        headers['Content-Type'] = multipart_data.content_type
+
+        ok = self.post_write(multipart_data, headers)
+        if ok:
+            self.hierarchy.pop(data_filename)
+        return ok
 
     def upload_file(self, local_filename, data_filename, object_policy=None,
                     original_object_policy=None, **kwargs):
@@ -479,155 +573,16 @@ class Data:
             headers = copy.copy(self.headers)
             headers['Content-length'] = str(os.path.getsize(local_filename))
             headers['Content-Type'] = multipart_data.content_type
-            r = requests.post(self.base_url+"/write", data=multipart_data,
-                              headers=headers, cert=(self.cert, self.key),
-                              verify=self.trust)
-        self.log.debug("The sent request")
-        self.log.debug("URL: {}".format(r.request.url))
-        self.log.debug("Body: {}".format(r.request.body))
-        self.log.debug("Headers: {}".format(r.request.headers))
-        self.log.debug("Response")
-        self.log.debug(r.status_code)
-        self.log.debug(r.text)
 
-        ok = r.ok
-        r.close()
-        if ok:
-            self.hierarchy[data_filename] = r.json()[0]["oid"]
+            write_response = self.post_write(multipart_data, headers)
 
-        return ok
+        # if we get an oid back, add it to hierarchy and return True
+        # otherwise return false (which is write_response)
+        if write_response:
+            self.hierarchy[data_filename] = write_response
+            return True
 
-    def make_directory_tree(self, path, object_policy=None,
-                            original_object_policy=None, **kwargs):
-        """Recursively create directories in GM Data.
-
-        :param path: Path to be created in GM Data
-        :param object_policy: A LISP statement of the Object Policy to be
-            used for all folders that will be created in 
-        :param kwargs: extra keywords to be set:
-            - security - The security tag of the given file. If not supplied
-            it will keep what is already there or it will use the field
-            from the parent if creating a new file.
-        :param original_object_policy: Field to be put into the
-            originalobjectpolicy field. This can be lisp or OPA/Rego depending
-            on the version of GM Data that is in use.
-        :return: oid on success
-        """
-        path = Path(path)
-        oid = self.find_file(str(path.parent))
-        if isinstance(object_policy, str):
-            object_policy = json.loads(object_policy)
-
-        self.log.debug("Looking for {}, oid {}".format(path.parent, oid))
-        if not oid:
-            if str(path) == path.root:
-                raise Exception('Unable to locate the root directory')
-            self.log.debug("Path {} not found, creating"
-                           " parent".format(path.parent))
-            self.make_directory_tree(str(path.parent),
-                                     object_policy=object_policy,
-                                     original_object_policy=original_object_policy,
-                                     **kwargs)
-
-        oid = self.find_file(str(path.parent))
-
-        self.log.debug("New file under parent OID: {}, name: {}"
-                       "".format(oid, path.name))
-
-        body = {
-            "action": "C",
-            "name": path.name,
-            "parentoid": oid,
-            "isFile": False
-        }
-
-        if object_policy:
-            body['objectpolicy'] = object_policy
-            body['originalobjectpolicy'] = object_policy
-        # just overwrite what we just did if we need to
-        if original_object_policy:
-            body['originalobjectpolicy'] = original_object_policy
-        if "objectpolicy" not in body.keys() or\
-                'originalobjectpolicy' not in body.keys():
-            prop_json = self.get_props(path.parent)
-            self.log.debug("The parsed OP: {}".format(prop_json['objectpolicy']))
-            body['objectpolicy'] = prop_json['objectpolicy']
-
-        if 'security' in kwargs:
-            body['security'] = kwargs['security']
-        else:
-            body['security'] = self.default_security
-
-        files = {'file': ('meta', json.dumps([body]))}
-        r = requests.post(self.base_url + "/write", files=files,
-                          headers=self.headers, cert=(self.cert, self.key),
-                          verify=self.trust)
-
-        self.log.debug("The sent request")
-        self.log.debug("URL: {}".format(r.request.url))
-        self.log.debug("Body: {}".format(r.request.body))
-        self.log.debug("Headers: {}".format(r.request.headers))
-        self.log.debug("Response")
-        self.log.debug(r.status_code)
-        self.log.debug(r.text)
-
-        ok = r.ok
-        r.close()
-        if ok:
-            oid = r.json()[0]["oid"]
-            self.hierarchy[path.as_posix()] = oid
-            return oid
-
-        return False
-
-    def get_part(self, data_filename, object_policy=None,
-                 original_object_policy=None):
-        """Get the file part append for a multi part file
-        :param data_filename: Filename in GM Data
-        :param object_policy: optional object policy to use
-        :return: File part like 'aab'
-        """
-        part = None
-        if data_filename not in self.hierarchy.keys():
-            oid = self.find_file(data_filename)
-            self.log.debug("Not found in hierarchy. oid {}".format(oid))
-            if not oid:
-                # this does not exist yet
-                # yes, we want a directory named for the file
-                oid = self.make_directory_tree(data_filename,
-                                               object_policy=object_policy,
-                                               original_object_policy=original_object_policy)
-                return "aaa"
-        else:
-            prop_json = self.get_props(data_filename)
-            oid = prop_json["oid"]
-            self.log.debug("Found in hierarchy. oid {}".format(oid))
-            # try:
-            #     if prop_json['isfile']:
-            #         self.log.debug("It's already a file, using parent's oid")
-            #         self.log.debug("using this json: {}".format(prop_json))
-            #         oid = prop_json['parentoid']
-            # except KeyError:
-            #     # download and delete the file, rename if it is a file
-            #     # not a file, this is the oid we want
-            #     pass
-        if not part:
-            # figure out the next part number
-            # start by listing them off
-            list_json = self.get_list(data_filename, oid=oid)
-            self.log.debug("The listing: {}".format(list_json))
-
-            # get only the filenames
-            names = [name['name'] for name in list_json if 'isfile' in name.keys()]
-            names.sort()
-            self.log.debug("names: {}".format(names))
-
-            # take the last one and increment it
-            if len(names) == 0:
-                return "aaa"
-            else:
-                self.log.debug("Names so far: {}".format(names[-1].split(".")[0]))
-                return self._increment_str(names[-1].split(".")[0])
+        return write_response
 
     def append_file(self, local_filename, data_filename, object_policy=None):
         """Append an uploaded file with another file on disk
@@ -651,7 +606,7 @@ class Data:
         return False
 
     def append_data(self, data, data_filename, object_policy=None,
-                    original_object_policy=None):
+                    original_object_policy=None, **kwargs):
         """Append the given filename with the given data in memory
 
         :param data: Data to append to a file. Remember to add line endings
@@ -674,7 +629,7 @@ class Data:
         meta = self.create_meta("{}/{}".format(data_filename, part),
                                 object_policy=object_policy,
                                 original_object_policy=original_object_policy,
-                                mimetype=mimetype)
+                                mimetype=mimetype, **kwargs)
 
         if isinstance(data, str):
             with io.StringIO(data) as f:
@@ -694,28 +649,18 @@ class Data:
 
                 headers = copy.copy(self.headers)
                 headers['Content-Type'] = multipart_data.content_type
-        r = requests.post(self.base_url + "/write", data=multipart_data,
-                          headers=headers, cert=(self.cert, self.key),
-                          verify=self.trust)
-
-        self.log.debug("The append_data sent request")
-        self.log.debug("URL: {}".format(r.request.url))
-        self.log.debug("Body: {}".format(r.request.body))
-        self.log.debug("Headers: {}".format(r.request.headers))
+        write_response = self.post_write(multipart_data, headers)
 
         try:
-            self.log.debug("Response")
-            self.log.debug(r.status_code)
-            self.log.debug(r.json())
-            if r.ok:
+
+            if write_response:
                 if not self.repopulate:
-                    new_id = r.json()[0]["oid"]
                     self.log.debug("Adding {}:{} to hierarchy without populating"
-                                   "".format(full_name, new_id))
-                    self.hierarchy[full_name] = new_id
-                    return r.ok
+                                   "".format(full_name, write_response))
+                    self.hierarchy[full_name] = write_response
+                    return True
                 self.populate_hierarchy('/')
-            return r.ok
+            return write_response  # should be false here
         except JSONDecodeError:
             return False
 
@@ -849,25 +794,147 @@ class Data:
 
         headers = copy.copy(self.headers)
         headers['Content-Type'] = multipart_data.content_type
-        r = requests.post(self.base_url + "/write", data=multipart_data,
-                          headers=headers, cert=(self.cert, self.key),
+
+        write_response = self.post_write(multipart_data, headers)
+        if write_response:
+            self.hierarchy[data_filename] = write_response
+            return True
+
+        return write_response
+
+    # --- Utility functions
+
+    def make_directory_tree(self, path, object_policy=None,
+                            original_object_policy=None, **kwargs):
+        """Recursively create directories in GM Data.
+
+        :param path: Path to be created in GM Data
+        :param object_policy: A LISP statement of the Object Policy to be
+            used for all folders that will be created in
+        :param kwargs: extra keywords to be set:
+            - security - The security tag of the given file. If not supplied
+            it will keep what is already there or it will use the field
+            from the parent if creating a new file.
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
+        :return: oid on success
+        """
+        path = Path(path)
+        oid = self.find_file(str(path.parent))
+        if isinstance(object_policy, str):
+            object_policy = json.loads(object_policy)
+
+        self.log.debug("Looking for {}, oid {}".format(path.parent, oid))
+        if not oid:
+            if str(path) == path.root:
+                raise Exception('Unable to locate the root directory')
+            self.log.debug("Path {} not found, creating"
+                           " parent".format(path.parent))
+            self.make_directory_tree(str(path.parent),
+                                     object_policy=object_policy,
+                                     original_object_policy=original_object_policy,
+                                     **kwargs)
+
+        oid = self.find_file(str(path.parent))
+
+        self.log.debug("New file under parent OID: {}, name: {}"
+                       "".format(oid, path.name))
+
+        body = {
+            "action": "C",
+            "name": path.name,
+            "parentoid": oid,
+            "isFile": False
+        }
+
+        if object_policy:
+            body['objectpolicy'] = object_policy
+            body['originalobjectpolicy'] = object_policy
+        # just overwrite what we just did if we need to
+        if original_object_policy:
+            body['originalobjectpolicy'] = original_object_policy
+        if "objectpolicy" not in body.keys() or\
+                'originalobjectpolicy' not in body.keys():
+            prop_json = self.get_props(path.parent)
+            self.log.debug("The parsed OP: {}".format(prop_json['objectpolicy']))
+            body['objectpolicy'] = prop_json['objectpolicy']
+
+        if 'security' in kwargs:
+            body['security'] = kwargs['security']
+        else:
+            body['security'] = self.default_security
+
+        files = {'file': ('meta', json.dumps([body]))}
+        r = requests.post(self.base_url + "/write", files=files,
+                          headers=self.headers, cert=(self.cert, self.key),
                           verify=self.trust)
 
-        self.log.debug("The append_data sent request")
+        self.log.debug("The sent request")
         self.log.debug("URL: {}".format(r.request.url))
         self.log.debug("Body: {}".format(r.request.body))
         self.log.debug("Headers: {}".format(r.request.headers))
         self.log.debug("Response")
         self.log.debug(r.status_code)
         self.log.debug(r.text)
+
+        ok = r.ok
         r.close()
+        if ok:
+            oid = r.json()[0]["oid"]
+            self.hierarchy[path.as_posix()] = oid
+            return oid
 
-        if r.ok:
-            self.hierarchy[data_filename] = r.json()[0]["oid"]
+        return False
 
-        return r.ok
+    def get_part(self, data_filename, object_policy=None,
+                 original_object_policy=None):
+        """Get the file part append for a multi part file
+        :param data_filename: Filename in GM Data
+        :param object_policy: optional object policy to use
+        :return: File part like 'aab'
+        """
+        part = None
+        if data_filename not in self.hierarchy.keys():
+            oid = self.find_file(data_filename)
+            self.log.debug("Not found in hierarchy. oid {}".format(oid))
+            if not oid:
+                # this does not exist yet
+                # yes, we want a directory named for the file
+                oid = self.make_directory_tree(data_filename,
+                                               object_policy=object_policy,
+                                               original_object_policy=original_object_policy)
+                return "aaa"
+        else:
+            prop_json = self.get_props(data_filename)
+            oid = prop_json["oid"]
+            self.log.debug("Found in hierarchy. oid {}".format(oid))
+            # try:
+            #     if prop_json['isfile']:
+            #         self.log.debug("It's already a file, using parent's oid")
+            #         self.log.debug("using this json: {}".format(prop_json))
+            #         oid = prop_json['parentoid']
+            # except KeyError:
+            #     # download and delete the file, rename if it is a file
+            #     # not a file, this is the oid we want
+            #     pass
+        if not part:
+            # figure out the next part number
+            # start by listing them off
+            list_json = self.get_list(data_filename, oid=oid)
+            self.log.debug("The listing: {}".format(list_json))
 
-    # --- Utility functions
+            # get only the filenames
+            names = [name['name'] for name in list_json if 'isfile' in name.keys()]
+            names.sort()
+            self.log.debug("names: {}".format(names))
+
+            # take the last one and increment it
+            if len(names) == 0:
+                return "aaa"
+            else:
+                self.log.debug("Names so far: {}".format(names[-1].split(".")[0]))
+                return self._increment_str(names[-1].split(".")[0])
 
     def find_file(self, filename):
         """Find a given file within the file hierarchy

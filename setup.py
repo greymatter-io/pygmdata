@@ -10,14 +10,13 @@ README = (HERE / "README.md").read_text()
 # This call to setup() does all the work
 setup(
     name="pygmdata",
-    version="0.0.6",
+    version="0.0.7",
     description="Package to interact with Grey Matter Data",
     long_description=README,
     long_description_content_type="text/markdown",
     url="https://github.com/greymatter-io/fracking",
     author="Dave Borncamp",
     author_email="engineering@greymatter.io",
-    license="MIT",
     classifiers=[
         "License :: OSI Approved :: MIT License",
         'Development Status :: 3 - Alpha',
