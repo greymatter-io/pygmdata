@@ -115,15 +115,20 @@ class Data:
             on the version of GM Data that is in use.
         :return: True if successful
         """
+
         configs = self.get_config()
-        namespace_userfield = configs["GMDATA_NAMESPACE_USERFIELD"]
-        root = configs["GMDATA_NAMESPACE"]
+        userfield = configs["GMDATA_NAMESPACE_USERFIELD"]
+        namespace = configs["GMDATA_NAMESPACE"]
+        my_self = json.loads(self.get_self())
 
-        self_json_values = self.get_self()
+        folder_name = my_self['values'][userfield][0]
 
-        user_folder_name = json.loads(self_json_values)['values'][namespace_userfield][0]
-        user_folder = "/{}/{}".format(root, user_folder_name)
-        return self.make_directory_tree(user_folder,
+        user_folder = f'/{namespace}/{folder_name}'
+
+        if object_policy is None and original_object_policy is None:
+            original_object_policy = f'(if (contains {userfield} "{folder_name}")(yield-all)(yield R X))'
+
+        return self.make_absolute_path(user_folder,
                                         object_policy=object_policy,
                                         original_object_policy=original_object_policy)
 
@@ -803,6 +808,55 @@ class Data:
         return write_response
 
     # --- Utility functions
+    def make_absolute_path(self, path, object_policy=None,
+                            original_object_policy=None, **kwargs):
+        """Create a directory from the root. Since object policy cannot be derived
+        from parent object, at least one of `object_policy` or `original_object_policy`
+        must be set.
+
+        :param path: Path to be created in GM Data
+        :param object_policy: A LISP statement of the Object Policy to be
+            used for all folders that will be created in
+        :param original_object_policy: Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
+        :param kwargs: extra keywords to be set:
+            - security - The security tag of the given file. If not supplied
+            it will keep what is already there or it will use the field
+            from the parent if creating a new file.
+        :return: oid of the deepest folder (the right most folder in the path) on success
+        """
+        configs = self.get_config()   
+        root_oid = configs['GMDATA_ROOT_OID']
+
+        body = {
+            'action': 'C',
+            'name': path,
+            'parentoid': root_oid,
+            'originalobjectpolicy': original_object_policy,
+            'objectpolicy': object_policy,
+            'security': kwargs.get('security') or self.default_security,
+            'isFile': False
+        }
+
+        files = {'file': ('meta', json.dumps([body]))}
+        r = requests.post(self.base_url + '/write', files=files,
+                          headers=self.headers, cert=(self.cert, self.key),
+                          verify=self.trust)
+
+        self.log.debug('The sent request')
+        self.log.debug('URL: {}'.format(r.request.url))
+        self.log.debug('Body: {}'.format(r.request.body))
+        self.log.debug('Headers: {}'.format(r.request.headers))
+        self.log.debug('Response')
+        self.log.debug(r.status_code)
+        self.log.debug(r.text)
+
+        if r.ok:
+            oid = r.json()[0]['oid']
+            return oid
+
+        return False
 
     def make_directory_tree(self, path, object_policy=None,
                             original_object_policy=None, **kwargs):
