@@ -10,7 +10,7 @@ README = (HERE / "README.md").read_text()
 # This call to setup() does all the work
 setup(
     name="pygmdata",
-    version="0.0.7",
+    version="0.0.9",
     description="Package to interact with Grey Matter Data",
     long_description=README,
     long_description_content_type="text/markdown",
@@ -29,8 +29,7 @@ setup(
     packages=["pygmdata"],
     include_package_data=True,
     install_requires=["requests>=2.25.1",
-                      "requests_toolbelt>=0.9.1",
-                      "Pillow>=7.2.0"],
+                      "requests_toolbelt>=0.9.1"],
     entry_points={
         "console_scripts": [
             "pygmdata=pygmdata.__main__:main",

@@ -8,10 +8,11 @@ import mimetypes
 import json
 from json import JSONDecodeError
 from pathlib import Path
-from PIL import Image
 import logging
 import urllib3
-# Does not see DI2E as a valid signing authority so suppress that warning
+
+# Does not see self signed certs as a valid signing authority
+# so suppress that warning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
@@ -97,8 +98,12 @@ class Data:
 
         :return: json from the config endpoint
         """
-        r = requests.get(self.base_url + "/config", headers=self.headers,
-                         cert=(self.cert, self.key), verify=self.trust)
+        try:
+            r = requests.get(self.base_url + "/config", headers=self.headers,
+                             cert=(self.cert, self.key), verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return None
 
         return r.json()
 
@@ -119,13 +124,46 @@ class Data:
         namespace_userfield = configs["GMDATA_NAMESPACE_USERFIELD"]
         root = configs["GMDATA_NAMESPACE"]
 
-        self_json_values = self.get_self()
+        self_json_values = json.loads(self.get_self())
 
-        user_folder_name = json.loads(self_json_values)['values'][namespace_userfield][0]
+        user_folder_name = self_json_values['values'][namespace_userfield][0]
         user_folder = "/{}/{}".format(root, user_folder_name)
+
+        # See if it is already created
+        props = self.get_props(user_folder)
+        if props:
+            return props
+
+        if not object_policy:
+            self.log.debug("Creating default Home directory OP")
+
+            op = self._make_home_op(self_json_values, namespace_userfield)
+            self.log.debug("Using OP: {}".format(op))
+            object_policy = op
         return self.make_directory_tree(user_folder,
                                         object_policy=object_policy,
                                         original_object_policy=original_object_policy)
+
+    def _make_home_op(self, self_json_values, namespace_userfield):
+
+        # permissions for user
+        permissions = [{'v': 'C'}, {'v': 'R'}, {'v': 'U'},
+                       {'v': 'D'}, {'v': 'X'}, {'v': 'P'}]
+        op = {'label': 'default home OP',
+             'reqiurements':
+                  {'f': 'if',
+                   'a': [
+                       {'f': 'contains',
+                        'a': [{'v': namespace_userfield},
+                              {'v': self_json_values['values'][namespace_userfield][0]}]},
+                       {'f': 'yield',
+                        'a': permissions},
+                       {'f': 'yield',
+                        'a': [{'v': 'R'}, {'v': 'X'}]}
+                   ]}
+              }
+
+        return op
 
     def get_self(self):
         """Hit GM Data's self endpoint.
@@ -138,8 +176,12 @@ class Data:
                 "org":["greymatter.io"]}}
 
         """
-        r = requests.get(self.base_url + "/self", headers=self.headers,
-                         cert=(self.cert, self.key), verify=self.trust)
+        try:
+            r = requests.get(self.base_url + "/self", headers=self.headers,
+                             cert=(self.cert, self.key), verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return None
         ret = r.text
         r.close()
         return ret
@@ -191,10 +233,14 @@ class Data:
             self.log.info("Path {} not found, cannot get props"
                           "".format(path))
             return None
+        try:
+            r = requests.get(self.base_url + '/props/{}'.format(oid),
+                             headers=self.headers,
+                             cert=(self.cert, self.key), verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return False
 
-        r = requests.get(self.base_url + '/props/{}'.format(oid),
-                         headers=self.headers,
-                         cert=(self.cert, self.key), verify=self.trust)
         if r.ok:
             return r.json()
         return False
@@ -228,8 +274,13 @@ class Data:
                               "".format(path))
                 return None
 
-        r = requests.get(url, headers=self.headers, cert=(self.cert, self.key),
-                         verify=self.trust)
+        try:
+            r = requests.get(url, headers=self.headers,
+                             cert=(self.cert, self.key),
+                             verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return None
         self.log.debug("URL: {}".format(r.request.url))
         self.log.debug("Body: {}".format(r.request.body))
         self.log.debug("Headers: {}".format(r.request.headers))
@@ -258,8 +309,13 @@ class Data:
                            " oid {}".format(path, oid))
             url = self.base_url + '/derived/{}'.format(oid)
 
-        r = requests.get(url, headers=self.headers, cert=(self.cert, self.key),
-                         verify=self.trust)
+        try:
+            r = requests.get(url, headers=self.headers,
+                             cert=(self.cert, self.key),
+                             verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return None
 
         return r.json()
 
@@ -277,9 +333,13 @@ class Data:
         if not headers:
             headers = self.headers
 
-        r = requests.post(self.base_url + "/write", data=data,
-                          headers=headers, cert=(self.cert, self.key),
-                          verify=self.trust)
+        try:
+            r = requests.post(self.base_url + "/write", data=data,
+                              headers=headers, cert=(self.cert, self.key),
+                              verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return False
 
         self.log.debug("The sent request")
         self.log.debug("URL: {}".format(r.request.url))
@@ -295,7 +355,7 @@ class Data:
         try:
             ret_json = r.json()[0]["oid"]
         except KeyError as err:
-            self.log.info("Was not able to write")
+            self.log.info("Was not able to write. {}".format(err))
             return False
         r.close()
 
@@ -386,7 +446,7 @@ class Data:
         elif "local_filename" in kwargs.keys():
             local_type = mimetypes.guess_type(kwargs["local_filename"])[0]
             if local_type is not None:
-                self.log.debug("Guessing type from local: {}".format(local_type))
+                self.log.debug("Guess type from local: {}".format(local_type))
                 mimetype = local_type
         self.log.debug("The determined mimetype is: {}".format(mimetype))
 
@@ -612,10 +672,14 @@ class Data:
         :param data: Data to append to a file. Remember to add line endings
             if needed.
         :param data_filename: Target filename to update
-        :param object_policy: Object Policy to use. Will update an existing
+        :param object_policy: optional - Object Policy to use. Will update
+            an existing
             object with this value or will make a new object with this policy.
             If not supplied for either, it will make a best effort to
             come up with a good response
+        :param original_object_policy: optional - Field to be put into the
+            originalobjectpolicy field. This can be lisp or OPA/Rego depending
+            on the version of GM Data that is in use.
         :return: True on success
         """
         part = self.get_part(data_filename, object_policy=object_policy)
@@ -655,7 +719,7 @@ class Data:
 
             if write_response:
                 if not self.repopulate:
-                    self.log.debug("Adding {}:{} to hierarchy without populating"
+                    self.log.debug("Add {}:{} to hierarchy without populating"
                                    "".format(full_name, write_response))
                     self.hierarchy[full_name] = write_response
                     return True
@@ -699,9 +763,13 @@ class Data:
         oid = self.find_file(file)
 
         if oid:
-            r = requests.get(self.base_url+"/stream/{}".format(oid),
-                             headers=self.headers, stream=True,
-                             cert=(self.cert, self.key), verify=self.trust)
+            try:
+                r = requests.get(self.base_url+"/stream/{}".format(oid),
+                                 headers=self.headers, stream=True,
+                                 cert=(self.cert, self.key), verify=self.trust)
+            except Exception as err:
+                self.log.error("Could not connect to Data. {}".format(err))
+                return None
             r.raise_for_status()
             r.raw.decode_content = True
             return io.BytesIO(r.content)
@@ -728,15 +796,18 @@ class Data:
             self.log.warning("Cannot find file in GM-Data to download.")
             return None
 
-        r = requests.get(self.base_url+"/stream/{}".format(oid),
-                         headers=self.headers, stream=True,
-                         cert=(self.cert, self.key), verify=self.trust)
+        try:
+            r = requests.get(self.base_url+"/stream/{}".format(oid),
+                             headers=self.headers, stream=True,
+                             cert=(self.cert, self.key), verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return None
         r.raise_for_status()
         r.raw.decode_content = True
 
         if "image" in r.headers['Content-Type']:
-            im = Image.open(r.raw)
-            return im
+            return r.raw
         if r.headers['Content-Type'] == 'application/json':
             return r.json()
         if r.headers['Content-Type'] == 'text/plain':
@@ -857,7 +928,7 @@ class Data:
         if "objectpolicy" not in body.keys() or\
                 'originalobjectpolicy' not in body.keys():
             prop_json = self.get_props(path.parent)
-            self.log.debug("The parsed OP: {}".format(prop_json['objectpolicy']))
+            self.log.debug("Parsed OP: {}".format(prop_json['objectpolicy']))
             body['objectpolicy'] = prop_json['objectpolicy']
 
         if 'security' in kwargs:
@@ -866,9 +937,13 @@ class Data:
             body['security'] = self.default_security
 
         files = {'file': ('meta', json.dumps([body]))}
-        r = requests.post(self.base_url + "/write", files=files,
-                          headers=self.headers, cert=(self.cert, self.key),
-                          verify=self.trust)
+        try:
+            r = requests.post(self.base_url + "/write", files=files,
+                              headers=self.headers, cert=(self.cert, self.key),
+                              verify=self.trust)
+        except Exception as err:
+            self.log.error("Could not connect to Data. {}".format(err))
+            return False
 
         self.log.debug("The sent request")
         self.log.debug("URL: {}".format(r.request.url))
@@ -890,8 +965,12 @@ class Data:
     def get_part(self, data_filename, object_policy=None,
                  original_object_policy=None):
         """Get the file part append for a multi part file
-        :param data_filename: Filename in GM Data
-        :param object_policy: optional object policy to use
+
+        :param data_filename: Filename in GM Data to append to
+        :param object_policy: optional - Object Policy to use
+        :param original_object_policy: optional - Original Object Policy to be
+            used
+
         :return: File part like 'aab'
         """
         part = None
