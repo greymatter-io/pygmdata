@@ -4,6 +4,9 @@ Library for making a Python library to interact with Grey Matter Data (GM-Data).
 This only works on Python 3.
 Python 2.7 will NOT be supported as it is past end of life.
 
+*NOTE* This is still very much an Alpha release and may break.
+Refactoring of the Data class may be required, time to actually engineer a proper solution should be taken.
+
 ## Goals
 
 - Stream data from GM Data instead of having to download it to the local machine
