@@ -11,7 +11,7 @@ README = (HERE / "README.md").read_text()
 setup(
     name="pygmdata",
     version="0.0.9",
-    description="Package to interact with Grey Matter Data",
+    description="Package to interact with greymatter Data",
     long_description=README,
     long_description_content_type="text/markdown",
     url="https://github.com/greymatter-io/fracking",

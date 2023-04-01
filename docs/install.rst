@@ -22,7 +22,7 @@ The package is currently in PyPi test and can be installed with ::
 Verify Installation
 *******************
 
-The installation can be verified by making sure that your instance of Grey Matter Data is running.
+The installation can be verified by making sure that your instance of greymatter Data is running.
 Then running Python and hitting the ``self`` endpoint with the ``get_self()`` method::
 
     >> from pygmdata import Data
